@@ -97,7 +97,7 @@ bot.start(async (ctx) => {
     `👛 Connect your TON Wallet for seamless payouts!\n\n` +
     `Click below to start mining or join our official channel:`;
 
-  const baseWebAppUrl = process.env.WEBAPP_URL || 'https://popcron.ai.studio/';
+  const baseWebAppUrl = process.env.WEBAPP_URL || 'https://popcorusa-production.up.railway.app/';
   const webAppLaunchUrl = referralCode
     ? `${baseWebAppUrl}${baseWebAppUrl.includes('?') ? '&' : '?'}startapp=${referralCode}&tgWebAppStartParam=${referralCode}&start_param=${referralCode}&start=${referralCode}`
     : baseWebAppUrl;
