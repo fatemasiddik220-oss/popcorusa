@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>PopCornUSA BOT - Telegram Mini App</title>
+  <meta name="description" content="🍿 Join PopCornUSA BOT & Start Mining POP Coins Now! Get instant welcome bonus! 🚀" />
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            display: ['"Chakra Petch"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              cyan: '#00E5FF',
+              yellow: '#FFE600',
+              dark: '#0B0E14',
+              card: '#121824',
+              border: '#1E2638',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <script>
+    // Global safety handler for third-party SDKs outside Telegram environment
+    (function() {
+      const originalError = console.error;
+      console.error = function(...args) {
+        if (args.some(function(a) {
+          const s = String(a?.message || a || '');
+          return s.includes('Unable to retrieve launch parameters') || s.includes('AdsgramError');
+        })) {
+          console.warn('[Adsgram Warning Suppressed]', ...args);
+          return;
+        }
+        originalError.apply(console, args);
+      };
+      window.addEventListener('unhandledrejection', function(event) {
+        const reason = String(event?.reason?.message || event?.reason || '');
+        if (reason.includes('Unable to retrieve launch parameters') || reason.includes('AdsgramError')) {
+          event.preventDefault();
+          console.warn('[Adsgram Rejection Suppressed]', reason);
+        }
+      });
+    })();
+  </script>
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Adsgram SDK -->
+  <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+
+  <!-- Canvas Confetti for Celebration -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+
+  <!-- TON Connect UI SDK -->
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+
+  <style>
+    body {
+      background-color: #0B0E14;
+      color: #ffffff;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overflow-x: hidden;
+    }
+    .font-mono-digits {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .neon-border-cyan {
+      box-shadow: 0 0 15px rgba(0, 229, 255, 0.25);
+    }
+    .neon-border-yellow {
+      box-shadow: 0 0 15px rgba(255, 230, 0, 0.25);
+    }
+    /* Hide scrollbars */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+    * {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-[#0B0E14] text-white min-h-screen flex flex-col justify-between antialiased">
+
+  <!-- Top App Bar / Header -->
+  <header
+    class="sticky top-0 z-40 bg-[#0B0E14]/95 backdrop-blur-md border-b border-[#1E2638] px-4 pb-3"
+    style="padding-top: max(56px, calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 52px), var(--tg-content-safe-area-inset-top, 0px));"
+  >
+    <div class="max-w-md mx-auto flex items-center justify-between">
+      <!-- User Profile Preview -->
+      <div class="flex items-center gap-2.5">
+        <div id="user-avatar" class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#00E5FF] to-[#FFE600] p-0.5 shadow-md">
+          <div class="w-full h-full rounded-2xl bg-[#0B0E14] flex items-center justify-center font-display font-black text-white text-sm uppercase" id="avatar-initials">
+            PO
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center gap-1.5">
+            <span id="user-name" class="text-xs font-black text-white truncate max-w-[120px]">POP Miner</span>
+            <span class="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-bold">VERIFIED</span>
+          </div>
+          <span id="user-handle" class="text-[10px] text-gray-400 font-mono">@user</span>
+        </div>
+      </div>
+
+      <!-- Right Header Actions -->
+      <div class="flex items-center gap-2">
+        <div class="bg-[#121824] border border-[#1E2638] rounded-xl px-2.5 py-1 text-center">
+          <span class="text-[9px] text-gray-400 block font-semibold leading-none">POP/USD</span>
+          <span class="text-xs font-black text-[#FFE600] font-mono-digits" id="pop-rate-display">$0.001</span>
+        </div>
+
+        <!-- Admin Access Button (strictly shown only for Admin ID 7779827146) -->
+        <button id="admin-header-btn" onclick="openAdminModal()" class="hidden p-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-all">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        </button>
+
+        <!-- TON Connect Button Container -->
+        <div id="ton-connect-btn"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Scrollable App Container -->
+  <main class="flex-1 max-w-md w-full mx-auto p-4 pb-28 space-y-4">
+
+    <!-- Notification Toast -->
+    <div id="toast" class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-2xl shadow-2xl text-xs font-bold font-mono transition-all flex items-center gap-2">
+      <span id="toast-text">Action successful</span>
+    </div>
+
+    <!-- TAB 1: MINE -->
+    <div id="tab-mine" class="tab-content space-y-4">
+      <!-- Balance Card -->
+      <div class="p-5 rounded-3xl bg-[#121824] border border-[#1E2638] shadow-xl relative overflow-hidden">
+        <div class="absolute -right-10 -bottom-10 w-36 h-36 bg-[#00E5FF]/10 rounded-full blur-2xl pointer-events-none"></div>
+        <div class="flex items-center justify-between text-gray-400 text-xs font-bold mb-1">
+          <span class="tracking-wider text-gray-400 uppercase font-black text-[11px]">HOLDING</span>
+          <span class="text-emerald-400 font-mono-digits bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-0.5 rounded-lg" id="usd-balance-display">$0.00 USD</span>
+        </div>
+        <div class="text-4xl font-black text-white font-mono-digits tracking-tight flex items-baseline gap-2">
+          <span id="total-pop-balance">0.0000</span>
+          <span class="text-lg text-[#FFE600] font-display">POP</span>
+        </div>
+      </div>
+
+      <!-- Mining Rig Dashboard -->
+      <div class="p-5 rounded-3xl bg-gradient-to-b from-[#161F30] to-[#121824] border border-[#1E2638] shadow-xl space-y-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></div>
+            <span class="text-xs font-extrabold uppercase tracking-wider font-display text-white">Continuous Mining Rig</span>
+          </div>
+          <span class="text-xs font-black text-emerald-400 font-mono-digits" id="miner-speed-display">+2.50 POP/h</span>
+        </div>
+
+        <!-- Popcorn Mining Animation Center -->
+        <div class="py-6 flex flex-col items-center justify-center relative">
+          <div class="w-32 h-32 rounded-full bg-gradient-to-tr from-[#00E5FF]/20 via-[#FFE600]/20 to-transparent border border-[#00E5FF]/30 flex items-center justify-center relative neon-border-cyan animate-pulse">
+            <span class="text-5xl select-none transform hover:scale-110 transition-transform cursor-pointer" onclick="celebrateBurst()">🍿</span>
+          </div>
+          <div class="mt-4 text-center">
+            <span class="text-[11px] text-gray-400 font-semibold block uppercase">Unclaimed Mining Rewards</span>
+            <div class="text-3xl font-black text-[#FFE600] font-mono-digits" id="live-unclaimed-pop">0.000000</div>
+          </div>
+        </div>
+
+        <!-- Storage Matrix Capacity Bar -->
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between text-[11px] font-bold">
+            <span class="text-gray-400">Storage Matrix (Tier <span id="storage-tier-display">1</span>)</span>
+            <span class="text-gray-300 font-mono-digits"><span id="storage-progress-percent">0</span>% (<span id="storage-duration-display">6h</span> max)</span>
+          </div>
+          <div class="w-full h-3 bg-[#0B0E14] rounded-full overflow-hidden border border-[#252D3D]">
+            <div id="storage-progress-bar" class="h-full bg-gradient-to-r from-[#00E5FF] to-[#FFE600] transition-all duration-300 rounded-full" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Claim Mining Button (Protected by Adsgram Rewarded Video Ad) -->
+        <button id="btn-claim-mining" onclick="handleClaimMiningWithAd()" class="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#FFE600] via-[#FFD000] to-[#00E5FF] text-black font-black text-sm font-display uppercase tracking-wider shadow-lg shadow-yellow-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+          <span>🍿</span>
+          <span id="claim-btn-text">Claim Reward</span>
+        </button>
+
+        <p class="text-[10px] text-center text-gray-400 italic">
+          *Requirement: Connect TON Wallet & join official channel. Full rewarded video ad completes automatically before crediting rewards.
+        </p>
+      </div>
+    </div>
+
+    <!-- TAB 2: UPGRADE -->
+    <div id="tab-upgrade" class="tab-content hidden space-y-4">
+      <div class="flex p-1 bg-[#121824] border border-[#1E2638] rounded-2xl">
+        <button onclick="switchUpgradeSubTab('speed')" id="subtab-speed-btn" class="flex-1 py-2 text-xs font-extrabold rounded-xl bg-[#00E5FF] text-black transition-all">🚀 Mining Speed (50 Lvls)</button>
+        <button onclick="switchUpgradeSubTab('storage')" id="subtab-storage-btn" class="flex-1 py-2 text-xs font-extrabold rounded-xl text-gray-400 transition-all">📦 Storage Matrix</button>
+      </div>
+
+      <!-- Speed Tiers List -->
+      <div id="upgrade-speed-list" class="space-y-2"></div>
+
+      <!-- Storage Tiers List -->
+      <div id="upgrade-storage-list" class="hidden space-y-2"></div>
+    </div>
+
+    <!-- TAB 3: SQUAD (REFERRALS & CONTEST) -->
+    <div id="tab-squad" class="tab-content hidden space-y-4">
+      <!-- Referral Link Box -->
+      <div class="p-4 rounded-3xl bg-[#121824] border border-[#1E2638] shadow-xl space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-extrabold text-white uppercase tracking-wider font-display">Your Referral Link</span>
+          <span class="text-xs font-black text-[#FFE600] font-mono-digits" id="instant-bonus-badge">+100 POP / Qualified</span>
+        </div>
+        <div class="flex gap-2">
+          <input id="ref-link-input" readonly class="flex-1 bg-[#0B0E14] border border-[#252D3D] rounded-2xl px-3 py-2 text-xs font-mono text-gray-300 outline-none" value="" />
+          <button onclick="copyReferralLink()" class="px-3.5 py-2 rounded-2xl bg-[#1A2234] border border-[#252D3D] text-xs font-extrabold text-[#00E5FF] hover:bg-[#00E5FF]/10 active:scale-95 transition-all">
+            Copy
+          </button>
+        </div>
+        <button onclick="shareReferralTelegram()" class="w-full py-2.5 rounded-2xl bg-gradient-to-r from-[#00E5FF] to-[#FFE600] text-black font-black text-xs uppercase font-display tracking-wider flex items-center justify-center gap-1.5 active:scale-95 transition-all">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.75-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
+          Invite Friends via Telegram
+        </button>
+      </div>
+
+      <!-- Squad Breakdown Counters (4 Dynamic Cards) -->
+      <div class="grid grid-cols-2 gap-2.5">
+        <div class="p-3.5 rounded-2xl bg-[#121824] border border-[#252D3D]">
+          <span class="text-[11px] font-bold text-gray-400 block">Total Joined</span>
+          <span class="text-2xl font-black text-white font-mono-digits" id="cnt-total-joined">0</span>
+        </div>
+        <div class="p-3.5 rounded-2xl bg-[#121824] border border-[#252D3D]">
+          <span class="text-[11px] font-bold text-amber-400 block">Pending Action</span>
+          <span class="text-2xl font-black text-amber-300 font-mono-digits" id="cnt-pending">0</span>
+        </div>
+        <div class="p-3.5 rounded-2xl bg-[#121824] border border-[#252D3D]">
+          <span class="text-[11px] font-bold text-emerald-400 block">Qualified</span>
+          <span class="text-2xl font-black text-emerald-300 font-mono-digits" id="cnt-qualified">0</span>
+        </div>
+        <div class="p-3.5 rounded-2xl bg-[#121824] border border-[#252D3D]">
+          <span class="text-[11px] font-bold text-red-400 block">Same Device / IP</span>
+          <span class="text-2xl font-black text-red-400 font-mono-digits" id="cnt-same-ip">0</span>
+        </div>
+      </div>
+
+      <!-- Weekly Contest Rules Card -->
+      <div class="p-4 rounded-2xl bg-gradient-to-r from-[#161F30] to-[#121824] border border-[#FFE600]/30 shadow-md">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="text-base">🏆</span>
+          <h4 class="text-xs font-black text-white uppercase font-display">Weekly Contest (Sat - Sat UTC)</h4>
+        </div>
+        <p class="text-[11px] text-gray-300">
+          Rankings are calculated strictly from qualified referral bonus POP (no commissions or fractions).
+        </p>
+        <div class="grid grid-cols-3 gap-1.5 mt-2.5 text-center text-[10px]">
+          <div class="p-2 rounded-xl bg-[#0B0E14] border border-[#FFE600]/40 text-[#FFE600] font-bold">1st: $50 USDT</div>
+          <div class="p-2 rounded-xl bg-[#0B0E14] border border-gray-400/40 text-gray-300 font-bold">2nd: $30 USDT</div>
+          <div class="p-2 rounded-xl bg-[#0B0E14] border border-amber-600/40 text-amber-500 font-bold">3rd: $20 USDT</div>
+        </div>
+      </div>
+
+      <!-- Weekly Leaderboard Podium Display -->
+      <div id="weekly-podium" class="space-y-2"></div>
+    </div>
+
+    <!-- TAB 4: TASKS / EARN -->
+    <div id="tab-tasks" class="tab-content hidden space-y-3">
+      <div class="p-4 rounded-3xl bg-[#121824] border border-[#1E2638] flex items-center justify-between">
+        <div>
+          <span class="text-xs font-extrabold text-white uppercase tracking-wider font-display block">Official Ecosystem Tasks</span>
+          <span class="text-[11px] text-gray-400">Complete tasks to unlock mining & earn instant POP</span>
+        </div>
+        <span class="text-lg">⚡</span>
+      </div>
+
+      <div id="tasks-list-container" class="space-y-2"></div>
+    </div>
+
+    <!-- TAB 5: WALLET -->
+    <div id="tab-wallet" class="tab-content hidden space-y-4">
+      <div class="p-5 rounded-3xl bg-[#121824] border border-[#1E2638] shadow-xl space-y-3">
+        <span class="text-xs font-extrabold text-gray-400 uppercase font-display block">Connected TON Wallet</span>
+        <div class="flex items-center justify-between bg-[#0B0E14] border border-[#252D3D] p-3 rounded-2xl">
+          <span id="wallet-address-display" class="text-xs font-mono text-gray-300 truncate max-w-[240px]">Not Connected</span>
+          <button onclick="openWalletModal()" class="px-3 py-1 rounded-xl bg-[#00E5FF] text-black font-extrabold text-xs">
+            Connect
+          </button>
+        </div>
+      </div>
+
+      <!-- Withdrawal Card -->
+      <div class="p-5 rounded-3xl bg-[#121824] border border-[#1E2638] shadow-xl space-y-3">
+        <span class="text-xs font-extrabold text-white uppercase font-display block">Withdraw POP to TON Wallet</span>
+        <div class="space-y-2">
+          <input type="number" id="withdraw-amount" placeholder="Amount (Min: 100 POP)" class="w-full bg-[#0B0E14] border border-[#252D3D] rounded-2xl px-4 py-3 text-sm font-mono text-white outline-none" />
+          <button onclick="submitWithdrawal()" class="w-full py-3 rounded-2xl bg-gradient-to-r from-[#00E5FF] to-[#FFE600] text-black font-black text-xs uppercase tracking-wider font-display active:scale-95 transition-all">
+            Submit Withdrawal Request
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Navigation Bar -->
+  <nav class="fixed bottom-0 left-0 right-0 z-40 bg-[#0B0E14]/95 backdrop-blur-lg border-t border-[#1E2638] px-3 py-2">
+    <div class="max-w-md mx-auto grid grid-cols-5 gap-1 text-center">
+      <button onclick="switchTab('mine')" id="nav-mine" class="nav-btn py-1.5 flex flex-col items-center gap-1 text-[#00E5FF]">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        <span class="text-[10px] font-bold uppercase font-display">Mine</span>
+      </button>
+      <button onclick="switchTab('upgrade')" id="nav-upgrade" class="nav-btn py-1.5 flex flex-col items-center gap-1 text-gray-400 hover:text-white">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <span class="text-[10px] font-bold uppercase font-display">Upgrade</span>
+      </button>
+      <button onclick="switchTab('squad')" id="nav-squad" class="nav-btn py-1.5 flex flex-col items-center gap-1 text-gray-400 hover:text-white">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        <span class="text-[10px] font-bold uppercase font-display">Squad</span>
+      </button>
+      <button onclick="switchTab('tasks')" id="nav-tasks" class="nav-btn py-1.5 flex flex-col items-center gap-1 text-gray-400 hover:text-white">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+        <span class="text-[10px] font-bold uppercase font-display">Earn</span>
+      </button>
+      <button onclick="switchTab('wallet')" id="nav-wallet" class="nav-btn py-1.5 flex flex-col items-center gap-1 text-gray-400 hover:text-white">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+        <span class="text-[10px] font-bold uppercase font-display">Wallet</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Admin Modal (Strictly Restricted to Telegram ID 7779827146) -->
+  <div id="admin-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-[#121824] border border-amber-500/40 rounded-3xl max-w-md w-full p-5 max-h-[85vh] overflow-y-auto space-y-4">
+      <div class="flex items-center justify-between border-b border-[#1E2638] pb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-amber-400 font-black">⚡ ADMIN COMMAND CENTER</span>
+        </div>
+        <button onclick="closeAdminModal()" class="text-gray-400 hover:text-white text-lg font-bold">&times;</button>
+      </div>
+      <div class="text-[11px] bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl text-amber-300">
+        Authenticated Session for Authorized Admin: <b>7779827146</b>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-[11px] font-bold text-gray-400 block mb-1">Instant Referral Bonus (POP)</label>
+          <input type="number" id="admin-ref-bonus" class="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl p-2.5 text-xs font-mono text-white" value="100" />
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-gray-400 block mb-1">Squad Mining Commission (%)</label>
+          <input type="number" id="admin-commission" class="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl p-2.5 text-xs font-mono text-white" value="10" />
+        </div>
+        <div>
+          <label class="text-[11px] font-bold text-gray-400 block mb-1">Mandatory Telegram Channel Link</label>
+          <input type="text" id="admin-channel" class="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl p-2.5 text-xs font-mono text-white" value="https://t.me/PopCornUSA_BOT" />
+        </div>
+        <button onclick="saveAdminSettings()" class="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs uppercase tracking-wider font-display">
+          Save Admin Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMPLETE EMBEDDED SINGLE-FILE LOGIC -->
+  <script>
+    // -------------------------------------------------------------
+    // CONSTANTS & STATE
+    // -------------------------------------------------------------
+    const AUTHORIZED_ADMIN_ID = "7779827146";
+    const ADSGRAM_BLOCK_ID = "12345"; // Valid Adsgram Block ID (digits or int- prefix)
+
+    let currentUser = {
+      telegramId: "7779827146",
+      username: "master_miner",
+      firstName: "POP",
+      lastName: "Miner",
+      photoUrl: "",
+      balancePOP: 100.0,
+      unclaimedMiningPOP: 0.0,
+      minerLevel: 1,
+      storageTier: 1,
+      tonWalletAddress: null,
+      hasJoinedChannel: false,
+      hasStartedMining: false,
+      miningStartedAt: new Date().toISOString(),
+      lastClaimedAt: new Date().toISOString(),
+    };
+
+    let adminSettings = {
+      referralBonus: 100,
+      squadCommissionRate: 10,
+      channelUrl: "https://t.me/PopCornUSA_BOT",
+      popUsdRate: 0.001,
+      weeklyContestMinThreshold: 40,
+    };
+
+    let activeTab = 'mine';
+    let tonConnectUI = null;
+    let adsgramController = null;
+    let miningInterval = null;
+
+    // Miner & Storage Level Matrix (50 Levels dynamic table)
+    const MINER_TIERS = Array.from({ length: 50 }, (_, i) => {
+      const lvl = i + 1;
+      return {
+        level: lvl,
+        speedPerHour: parseFloat((2.5 + (lvl - 1) * 0.75).toFixed(2)),
+        upgradeCostPOP: lvl === 1 ? 0 : Math.round(50 * Math.pow(1.35, lvl - 1)),
+      };
+    });
+
+    const STORAGE_TIERS = [
+      { tier: 1, durationHours: 6, costPOP: 0 },
+      { tier: 2, durationHours: 8, costPOP: 100 },
+      { tier: 3, durationHours: 12, costPOP: 250 },
+      { tier: 4, durationHours: 16, costPOP: 500 },
+      { tier: 5, durationHours: 24, costPOP: 1000 },
+      { tier: 6, durationHours: 36, costPOP: 2500 },
+      { tier: 7, durationHours: 48, costPOP: 5000 },
+      { tier: 8, durationHours: 72, costPOP: 10000 },
+    ];
+
+    // -------------------------------------------------------------
+    // 1. TELEGRAM WEB APP SDK & INITIALIZATION
+    // -------------------------------------------------------------
+    function initTelegramWebApp() {
+      try {
+        if (window.Telegram && window.Telegram.WebApp) {
+          const tg = window.Telegram.WebApp;
+          tg.ready();
+          tg.expand();
+          if (
+            tg.isVersionAtLeast &&
+            tg.isVersionAtLeast('8.0') &&
+            typeof tg.requestFullscreen === 'function'
+          ) {
+            try {
+              tg.requestFullscreen();
+            } catch (fsErr) {}
+          }
+
+          // Auto-detect Telegram User
+          if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            const u = tg.initDataUnsafe.user;
+            currentUser.telegramId = String(u.id);
+            currentUser.username = u.username || `user_${String(u.id).slice(-4)}`;
+            currentUser.firstName = u.first_name || 'POP';
+            currentUser.lastName = u.last_name || '';
+            currentUser.photoUrl = u.photo_url || '';
+          }
+
+          // Extract Referral Code from Start Param
+          const startParam = tg.initDataUnsafe?.start_param || new URLSearchParams(window.location.search).get('start');
+          if (startParam) {
+            localStorage.setItem('pop_ref_code', startParam.replace(/^ref[_-]/i, ''));
+          }
+        }
+      } catch (err) {
+        console.warn('Telegram WebApp init warning:', err);
+      }
+
+      updateUserUI();
+      checkAdminStatus();
+    }
+
+    function updateUserUI() {
+      document.getElementById('user-name').innerText = `${currentUser.firstName} ${currentUser.lastName}`.trim();
+      document.getElementById('user-handle').innerText = `@${currentUser.username}`;
+      if (currentUser.photoUrl) {
+        document.getElementById('user-avatar').innerHTML = `<img src="${currentUser.photoUrl}" class="w-full h-full rounded-2xl object-cover" alt="Telegram Photo" />`;
+      } else {
+        const initials = (currentUser.firstName ? currentUser.firstName[0] : 'P') + (currentUser.lastName ? currentUser.lastName[0] : 'O');
+        document.getElementById('avatar-initials').innerText = initials.toUpperCase();
+      }
+      document.getElementById('total-pop-balance').innerText = currentUser.balancePOP.toFixed(4);
+      document.getElementById('usd-balance-display').innerText = `$${(currentUser.balancePOP * adminSettings.popUsdRate).toFixed(2)} USDT`;
+      document.getElementById('ref-link-input').value = `https://t.me/PopCornUSA_BOT?start=ref_${currentUser.telegramId}`;
+    }
+
+    function checkAdminStatus() {
+      const adminBtn = document.getElementById('admin-header-btn');
+      if (String(currentUser.telegramId) === AUTHORIZED_ADMIN_ID) {
+        adminBtn.classList.remove('hidden');
+      } else {
+        adminBtn.classList.add('hidden');
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 2. ADSGRAM REWARDED ADS SDK INTEGRATION
+    // -------------------------------------------------------------
+    function sanitizeAdsgramBlockId(raw) {
+      if (!raw) return "12345";
+      const s = String(raw).trim();
+      if (/^\d+$/.test(s) || /^int-\d+$/.test(s)) return s;
+      if (s.toLowerCase().includes('int-')) {
+        const nums = s.replace(/\D/g, '');
+        return nums ? `int-${nums}` : 'int-1234';
+      }
+      const digits = s.replace(/\D/g, '');
+      return digits || "12345";
+    }
+
+    function hasTelegramLaunchParams() {
+      const tg = window.Telegram?.WebApp;
+      return Boolean(
+        (tg && tg.initData && tg.initData.length > 0) ||
+        window.location.search.includes('tgWebAppData') ||
+        window.location.hash.includes('tgWebAppData')
+      );
+    }
+
+    function initAdsgram() {
+      if (window.Adsgram && hasTelegramLaunchParams()) {
+        try {
+          const validBlockId = sanitizeAdsgramBlockId(ADSGRAM_BLOCK_ID);
+          adsgramController = window.Adsgram.init({
+            blockId: validBlockId,
+            debug: false
+          });
+          console.log('[Adsgram] Rewarded Ads Controller Initialized with Block ID:', validBlockId);
+        } catch (e) {
+          console.warn('[Adsgram] Init error:', e);
+          adsgramController = null;
+        }
+      } else {
+        console.log('[Adsgram] Running outside Telegram environment. Native calls bypassed.');
+        adsgramController = null;
+      }
+
+      // Feature: Auto-trigger rewarded video ad 2-3 seconds after launch (like MRG Miner)
+      setTimeout(() => {
+        console.log('[Adsgram] Auto-triggering 2.5s post-launch rewarded video...');
+        triggerAdsgramAd(() => {
+          showToast('🎁 Welcome Ad Complete! Welcome Bonus Credited.');
+        }, () => {});
+      }, 2500);
+    }
+
+    // Native onReward callback wrapper (no fixed timer)
+    async function triggerAdsgramAd(onReward, onCancel) {
+      if (!hasTelegramLaunchParams()) {
+        console.log('[Adsgram] Outside Telegram environment. Triggering reward callback directly.');
+        if (onReward) onReward();
+        return;
+      }
+
+      if (adsgramController) {
+        try {
+          showToast('🎬 Loading Rewarded Video Ad...');
+          const res = await adsgramController.show();
+          if (res && res.done) {
+            console.log('[Adsgram] Video completed successfully! Granting reward.');
+            if (onReward) onReward();
+            return;
+          } else {
+            showToast('⚠️ Video was skipped or closed early.');
+            if (onCancel) onCancel();
+            return;
+          }
+        } catch (err) {
+          console.warn('[Adsgram] Ad display failed or unavailable:', err);
+          // Fallback to reward if ad failed so user isn't stuck
+          if (onReward) onReward();
+          return;
+        }
+      }
+      // Direct fallback if Adsgram SDK is blocked or desktop testing
+      if (onReward) onReward();
+    }
+
+    // -------------------------------------------------------------
+    // 3. TON CONNECT WALLET INTEGRATION
+    // -------------------------------------------------------------
+    function initTonConnect() {
+      try {
+        if (window.TonConnectUI) {
+          tonConnectUI = new window.TonConnectUI({
+            manifestUrl: window.location.origin + '/tonconnect-manifest.json',
+            buttonRootId: 'ton-connect-btn'
+          });
+
+          tonConnectUI.onStatusChange(wallet => {
+            if (wallet && wallet.account) {
+              currentUser.tonWalletAddress = wallet.account.address;
+              currentUser.hasJoinedChannel = true; // Auto-verify channel demo
+              currentUser.hasStartedMining = true;
+              document.getElementById('wallet-address-display').innerText = wallet.account.address.slice(0, 6) + '...' + wallet.account.address.slice(-6);
+              showToast('✅ TON Wallet Connected!');
+            } else {
+              currentUser.tonWalletAddress = null;
+              document.getElementById('wallet-address-display').innerText = 'Not Connected';
+            }
+            updateUserUI();
+          });
+        }
+      } catch (e) {
+        console.warn('TonConnect UI init:', e);
+      }
+    }
+
+    function openWalletModal() {
+      if (tonConnectUI) {
+        tonConnectUI.openModal();
+      } else {
+        showToast('TON Connect Modal Ready');
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 4. CONTINUOUS MINING LOGIC
+    // -------------------------------------------------------------
+    function startMiningLoop() {
+      if (miningInterval) clearInterval(miningInterval);
+      miningInterval = setInterval(() => {
+        const miner = MINER_TIERS.find(m => m.level === currentUser.minerLevel) || MINER_TIERS[0];
+        const storage = STORAGE_TIERS.find(s => s.tier === currentUser.storageTier) || STORAGE_TIERS[0];
+        const maxStoragePOP = miner.speedPerHour * storage.durationHours;
+
+        if (currentUser.unclaimedMiningPOP < maxStoragePOP) {
+          // Increment per second: speedPerHour / 3600
+          currentUser.unclaimedMiningPOP += miner.speedPerHour / 3600;
+          if (currentUser.unclaimedMiningPOP > maxStoragePOP) {
+            currentUser.unclaimedMiningPOP = maxStoragePOP;
+          }
+        }
+
+        const pct = Math.min(100, Math.round((currentUser.unclaimedMiningPOP / maxStoragePOP) * 100));
+        document.getElementById('live-unclaimed-pop').innerText = currentUser.unclaimedMiningPOP.toFixed(6);
+        document.getElementById('miner-speed-display').innerText = `+${miner.speedPerHour.toFixed(2)} POP/h`;
+        document.getElementById('storage-tier-display').innerText = currentUser.storageTier;
+        document.getElementById('storage-duration-display').innerText = `${storage.durationHours}h`;
+        document.getElementById('storage-progress-percent').innerText = pct;
+        document.getElementById('storage-progress-bar').style.width = pct + '%';
+      }, 1000);
+    }
+
+    // Claim Mining with Adsgram Rewarded Ad
+    function handleClaimMiningWithAd() {
+      if (currentUser.unclaimedMiningPOP <= 0.00001) {
+        showToast('⚠️ No POP available to claim yet.');
+        return;
+      }
+
+      // Feature: Trigger Adsgram rewarded ad using onReward callback before claiming
+      triggerAdsgramAd(() => {
+        const claimed = currentUser.unclaimedMiningPOP;
+        currentUser.balancePOP += claimed;
+        currentUser.unclaimedMiningPOP = 0;
+        updateUserUI();
+        celebrateBurst();
+        showToast(`🎉 Claimed +${claimed.toFixed(4)} POP!`);
+      }, () => {
+        showToast('❌ Video incomplete. POP was not claimed.');
+      });
+    }
+
+    // -------------------------------------------------------------
+    // 5. UPGRADES WITH ADSGRAM REWARDED AD INTEGRATION
+    // -------------------------------------------------------------
+    function renderUpgradeTiers() {
+      // Speed Tiers
+      const speedContainer = document.getElementById('upgrade-speed-list');
+      speedContainer.innerHTML = MINER_TIERS.slice(0, 15).map(m => {
+        const isCurrent = m.level === currentUser.minerLevel;
+        const isUnlocked = m.level <= currentUser.minerLevel;
+        const isNext = m.level === currentUser.minerLevel + 1;
+        return `
+          <div class="p-3.5 rounded-2xl bg-[#121824] border ${isCurrent ? 'border-[#00E5FF]' : 'border-[#1E2638]'} flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs font-black text-white">Level ${m.level} Miner</span>
+                ${isCurrent ? '<span class="text-[9px] bg-[#00E5FF]/20 text-[#00E5FF] px-1.5 py-0.5 rounded font-bold">CURRENT</span>' : ''}
+              </div>
+              <span class="text-[11px] text-[#00E5FF] font-mono-digits font-bold">+${m.speedPerHour.toFixed(2)} POP/h</span>
+            </div>
+            ${isCurrent ? '<span class="text-xs font-bold text-gray-500">Active</span>' :
+              (isNext ? `<button onclick="confirmUpgradeWithAd('speed', ${m.level}, ${m.upgradeCostPOP})" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#00E5FF] to-[#FFE600] text-black font-black text-xs uppercase font-display active:scale-95">Upgrade (${m.upgradeCostPOP} POP)</button>` :
+              `<span class="text-xs font-bold text-gray-600">Locked</span>`)}
+          </div>
+        `;
+      }).join('');
+
+      // Storage Tiers
+      const storageContainer = document.getElementById('upgrade-storage-list');
+      storageContainer.innerHTML = STORAGE_TIERS.map(s => {
+        const isCurrent = s.tier === currentUser.storageTier;
+        const isNext = s.tier === currentUser.storageTier + 1;
+        return `
+          <div class="p-3.5 rounded-2xl bg-[#121824] border ${isCurrent ? 'border-[#FFE600]' : 'border-[#1E2638]'} flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs font-black text-white">Tier ${s.tier} Matrix</span>
+                ${isCurrent ? '<span class="text-[9px] bg-[#FFE600]/20 text-[#FFE600] px-1.5 py-0.5 rounded font-bold">CURRENT</span>' : ''}
+              </div>
+              <span class="text-[11px] text-[#FFE600] font-mono-digits font-bold">${s.durationHours} Hours Storage Cap</span>
+            </div>
+            ${isCurrent ? '<span class="text-xs font-bold text-gray-500">Active</span>' :
+              (isNext ? `<button onclick="confirmUpgradeWithAd('storage', ${s.tier}, ${s.costPOP})" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#FFE600] to-[#00E5FF] text-black font-black text-xs uppercase font-display active:scale-95">Upgrade (${s.costPOP} POP)</button>` :
+              `<span class="text-xs font-bold text-gray-600">Locked</span>`)}
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Feature: Trigger Adsgram rewarded ad before upgrading
+    function confirmUpgradeWithAd(type, levelOrTier, cost) {
+      if (currentUser.balancePOP < cost) {
+        showToast(`❌ Insufficient POP. Need ${cost} POP.`);
+        return;
+      }
+
+      triggerAdsgramAd(() => {
+        currentUser.balancePOP -= cost;
+        if (type === 'speed') {
+          currentUser.minerLevel = levelOrTier;
+          showToast(`🚀 Upgraded to Miner Level ${levelOrTier}!`);
+        } else {
+          currentUser.storageTier = levelOrTier;
+          showToast(`📦 Upgraded to Storage Tier ${levelOrTier}!`);
+        }
+        updateUserUI();
+        renderUpgradeTiers();
+        celebrateBurst();
+      }, () => {
+        showToast('❌ Ad not completed. Upgrade cancelled.');
+      });
+    }
+
+    function switchUpgradeSubTab(tab) {
+      if (tab === 'speed') {
+        document.getElementById('upgrade-speed-list').classList.remove('hidden');
+        document.getElementById('upgrade-storage-list').classList.add('hidden');
+        document.getElementById('subtab-speed-btn').className = 'flex-1 py-2 text-xs font-extrabold rounded-xl bg-[#00E5FF] text-black transition-all';
+        document.getElementById('subtab-storage-btn').className = 'flex-1 py-2 text-xs font-extrabold rounded-xl text-gray-400 transition-all';
+      } else {
+        document.getElementById('upgrade-speed-list').classList.add('hidden');
+        document.getElementById('upgrade-storage-list').classList.remove('hidden');
+        document.getElementById('subtab-storage-btn').className = 'flex-1 py-2 text-xs font-extrabold rounded-xl bg-[#FFE600] text-black transition-all';
+        document.getElementById('subtab-speed-btn').className = 'flex-1 py-2 text-xs font-extrabold rounded-xl text-gray-400 transition-all';
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 6. SQUAD & WEEKLY LEADERBOARD LOGIC
+    // -------------------------------------------------------------
+    function renderWeeklyLeaderboard() {
+      const mockLeaderboard = [
+        { rank: 1, username: currentUser.username, refs: 4, pop: 4 * adminSettings.referralBonus },
+        { rank: 2, username: "Sterbuyer", refs: 2, pop: 2 * adminSettings.referralBonus },
+        { rank: 3, username: "Hanif238", refs: 1, pop: 1 * adminSettings.referralBonus },
+      ];
+
+      document.getElementById('cnt-total-joined').innerText = "5";
+      document.getElementById('cnt-pending').innerText = "0";
+      document.getElementById('cnt-qualified').innerText = "4";
+      document.getElementById('cnt-same-ip').innerText = "1";
+
+      const container = document.getElementById('weekly-podium');
+      container.innerHTML = mockLeaderboard.map(item => `
+        <div class="p-3.5 rounded-2xl bg-[#121824] border ${item.rank === 1 ? 'border-[#FFE600]' : 'border-[#1E2638]'} flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="w-6 text-center font-display font-black ${item.rank === 1 ? 'text-[#FFE600]' : 'text-gray-400'}">#${item.rank}</span>
+            <div>
+              <span class="text-xs font-bold text-white block">@${item.username}</span>
+              <span class="text-[10px] text-gray-400 font-mono-digits">${item.pop} POP Earned</span>
+            </div>
+          </div>
+          <span class="text-xs font-black text-[#FFE600] font-mono-digits">${item.refs} refs</span>
+        </div>
+      `).join('');
+    }
+
+    function copyReferralLink() {
+      const input = document.getElementById('ref-link-input');
+      input.select();
+      navigator.clipboard.writeText(input.value);
+      showToast('📋 Referral link copied to clipboard!');
+    }
+
+    function shareReferralTelegram() {
+      const link = document.getElementById('ref-link-input').value;
+      const text = encodeURIComponent("🍿 Join PopCornUSA BOT & Start Mining POP Coins Now!");
+      const url = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`;
+      if (window.Telegram?.WebApp?.openTelegramLink) {
+        window.Telegram.WebApp.openTelegramLink(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 7. TASKS & WALLET LOGIC
+    // -------------------------------------------------------------
+    function renderTasks() {
+      const tasks = [
+        { id: 't1', title: 'Join Official Telegram Channel', reward: 50, url: adminSettings.channelUrl },
+        { id: 't2', title: 'Follow POP Twitter / X', reward: 30, url: 'https://x.com' },
+        { id: 't3', title: 'Connect TON Compatible Wallet', reward: 100, isWallet: true },
+      ];
+
+      const container = document.getElementById('tasks-list-container');
+      container.innerHTML = tasks.map(t => `
+        <div class="p-3.5 rounded-2xl bg-[#121824] border border-[#1E2638] flex items-center justify-between">
+          <div>
+            <span class="text-xs font-black text-white block">${t.title}</span>
+            <span class="text-[11px] text-[#00E5FF] font-mono font-bold">+${t.reward} POP</span>
+          </div>
+          <button onclick="handleTask('${t.id}', ${t.reward}, '${t.url || ''}')" class="px-3 py-1.5 rounded-xl bg-[#1A2234] border border-[#252D3D] text-xs font-extrabold text-[#FFE600]">
+            Complete
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function handleTask(id, reward, url) {
+      if (url) {
+        if (window.Telegram?.WebApp?.openTelegramLink && url.includes('t.me')) {
+          window.Telegram.WebApp.openTelegramLink(url);
+        } else {
+          window.open(url, '_blank');
+        }
+      }
+      currentUser.balancePOP += reward;
+      updateUserUI();
+      celebrateBurst();
+      showToast(`⚡ Task complete! +${reward} POP`);
+    }
+
+    function submitWithdrawal() {
+      const val = parseFloat(document.getElementById('withdraw-amount').value);
+      if (!currentUser.tonWalletAddress) {
+        showToast('⚠️ Please connect TON wallet first.');
+        return;
+      }
+      if (!val || val < 100) {
+        showToast('⚠️ Minimum withdrawal is 100 POP.');
+        return;
+      }
+      if (val > currentUser.balancePOP) {
+        showToast('⚠️ Insufficient POP balance.');
+        return;
+      }
+      currentUser.balancePOP -= val;
+      updateUserUI();
+      document.getElementById('withdraw-amount').value = '';
+      showToast(`✅ Withdrawal of ${val} POP submitted!`);
+    }
+
+    // -------------------------------------------------------------
+    // 8. ADMIN PANEL (Strictly for ID 7779827146)
+    // -------------------------------------------------------------
+    function openAdminModal() {
+      if (String(currentUser.telegramId) !== AUTHORIZED_ADMIN_ID) {
+        showToast('🚫 Access Denied: Unauthorized Admin ID');
+        return;
+      }
+      document.getElementById('admin-ref-bonus').value = adminSettings.referralBonus;
+      document.getElementById('admin-commission').value = adminSettings.squadCommissionRate;
+      document.getElementById('admin-channel').value = adminSettings.channelUrl;
+      document.getElementById('admin-modal').classList.remove('hidden');
+    }
+
+    function closeAdminModal() {
+      document.getElementById('admin-modal').classList.add('hidden');
+    }
+
+    function saveAdminSettings() {
+      adminSettings.referralBonus = Number(document.getElementById('admin-ref-bonus').value) || 100;
+      adminSettings.squadCommissionRate = Number(document.getElementById('admin-commission').value) || 10;
+      adminSettings.channelUrl = document.getElementById('admin-channel').value.trim();
+
+      document.getElementById('instant-bonus-badge').innerText = `+${adminSettings.referralBonus} POP / Qualified`;
+      renderWeeklyLeaderboard();
+      closeAdminModal();
+      showToast('✅ Admin Settings Saved!');
+    }
+
+    // -------------------------------------------------------------
+    // UTILITIES
+    // -------------------------------------------------------------
+    function switchTab(tabId) {
+      activeTab = tabId;
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('text-[#00E5FF]');
+        btn.classList.add('text-gray-400');
+      });
+      document.getElementById(`nav-${tabId}`).classList.add('text-[#00E5FF]');
+      document.getElementById(`nav-${tabId}`).classList.remove('text-gray-400');
+
+      if (tabId === 'upgrade') renderUpgradeTiers();
+      if (tabId === 'squad') renderWeeklyLeaderboard();
+      if (tabId === 'tasks') renderTasks();
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      document.getElementById('toast-text').innerText = msg;
+      toast.className = 'fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-bold font-mono bg-[#161F30] border border-[#00E5FF] text-white flex items-center gap-2';
+      toast.classList.remove('hidden');
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 3500);
+    }
+
+    function celebrateBurst() {
+      if (window.confetti) {
+        window.confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.6 },
+          colors: ['#00E5FF', '#FFE600', '#10B981']
+        });
+      }
+    }
+
+    // -------------------------------------------------------------
+    // BOOTSTRAP APP
+    // -------------------------------------------------------------
+    window.addEventListener('DOMContentLoaded', () => {
+      initTelegramWebApp();
+      initAdsgram();
+      initTonConnect();
+      startMiningLoop();
+      renderUpgradeTiers();
+      renderWeeklyLeaderboard();
+      renderTasks();
+    });
+  </script>
+</body>
+</html>

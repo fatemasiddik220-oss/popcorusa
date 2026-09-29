@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>PopCornUSA BOT</title>
+    <meta name="description" content="🍿 Join PopCornUSA BOT & Start Mining POP Coins Now! Get instant welcome bonus! 🚀" />
+    <meta property="og:site_name" content="PopCornUSA BOT" />
+    <meta property="og:title" content="PopCornUSA BOT" />
+    <meta property="og:description" content="🍿 Join PopCornUSA BOT & Start Mining POP Coins Now! Get instant welcome bonus! 🚀" />
+    <meta property="og:image" content="https://i.postimg.cc/8c4vM4H8/banner.jpg" />
+    <meta property="og:image:secure_url" content="https://i.postimg.cc/8c4vM4H8/banner.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="PopCornUSA BOT Mining Banner" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PopCornUSA BOT" />
+    <meta name="twitter:description" content="🍿 Join PopCornUSA BOT & Start Mining POP Coins Now! Get instant welcome bonus! 🚀" />
+    <meta name="twitter:image" content="https://i.postimg.cc/8c4vM4H8/banner.jpg" />
+    <meta name="telegram:channel" content="@PopCornUSA_BOT" />
+    <script>
+      // Global safety handler for third-party SDKs outside Telegram environment
+      (function() {
+        const originalError = console.error;
+        console.error = function(...args) {
+          if (args.some(function(a) {
+            const s = String(a?.message || a || '');
+            return s.includes('Unable to retrieve launch parameters') || s.includes('AdsgramError');
+          })) {
+            console.warn('[Adsgram Warning Suppressed]', ...args);
+            return;
+          }
+          originalError.apply(console, args);
+        };
+        window.addEventListener('unhandledrejection', function(event) {
+          const reason = String(event?.reason?.message || event?.reason || '');
+          if (reason.includes('Unable to retrieve launch parameters') || reason.includes('AdsgramError')) {
+            event.preventDefault();
+            console.warn('[Adsgram Rejection Suppressed]', reason);
+          }
+        });
+      })();
+    </script>
+    <!-- Telegram WebApp Script -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Adsgram SDK Script -->
+    <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+    <script>
+      try {
+        if (window.Telegram && window.Telegram.WebApp) {
+          window.Telegram.WebApp.ready();
+          window.Telegram.WebApp.expand();
+          if (
+            window.Telegram.WebApp.isVersionAtLeast &&
+            window.Telegram.WebApp.isVersionAtLeast('8.0') &&
+            typeof window.Telegram.WebApp.requestFullscreen === 'function'
+          ) {
+            try {
+              window.Telegram.WebApp.requestFullscreen();
+            } catch (fsErr) {}
+          }
+        }
+      } catch (e) {}
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#0B0E14] text-white select-none overflow-x-hidden antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
