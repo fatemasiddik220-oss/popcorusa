@@ -372,6 +372,18 @@ export async function adjustUserPointsInMongo(
 export async function saveSystemSettingsToMongo(config: AdminConfig): Promise<void> {
   if (!isMongoConnected()) return;
   try {
+    const configuredBonus = (config as any).referralBonus ??
+      (config as any).referralBonusAmount ??
+      (config as any).referral_bonus ??
+      config.instantReferralBonusPOP;
+    const configuredCommissionRate = (config as any).squadCommissionRate ?? config.referralCommissionPercent;
+    const referralBonus = Number.isFinite(Number(configuredBonus)) && Number(configuredBonus) >= 0
+      ? Number(configuredBonus)
+      : 0;
+    const commissionRate = Number.isFinite(Number(configuredCommissionRate))
+      ? Math.max(0, Math.min(100, Number(configuredCommissionRate)))
+      : 0;
+
     await SystemSettingsModel.findOneAndUpdate(
       { key: 'admin_config' },
       {
@@ -381,11 +393,11 @@ export async function saveSystemSettingsToMongo(config: AdminConfig): Promise<vo
           mandatory_channel_link: config.mandatoryChannelLink || 'https://t.me/PopCornUSA_BOT',
           channel_url: config.channelUrl || 'https://t.me/PopCornUSA_bot',
           telegram_bot_username: (config.telegramBotUsername || config.botUsername || 'PopCornUSA_bot').replace('@', '').trim(),
-          instant_referral_bonus_pop: Number((config as any).referralBonus ?? (config as any).referralBonusAmount ?? (config as any).referral_bonus ?? config.instantReferralBonusPOP ?? 100),
-          referral_bonus: Number((config as any).referralBonus ?? (config as any).referralBonusAmount ?? (config as any).referral_bonus ?? config.instantReferralBonusPOP ?? 100),
-          referralBonusAmount: Number((config as any).referralBonus ?? (config as any).referralBonusAmount ?? (config as any).referral_bonus ?? config.instantReferralBonusPOP ?? 100),
-          referral_commission_percent: Number((config as any).squadCommissionRate ?? config.referralCommissionPercent ?? 10),
-          squadCommissionRate: Number((config as any).squadCommissionRate ?? config.referralCommissionPercent ?? 10),
+          instant_referral_bonus_pop: referralBonus,
+          referral_bonus: referralBonus,
+          referralBonusAmount: referralBonus,
+          referral_commission_percent: commissionRate,
+          squadCommissionRate: commissionRate,
           pop_usd_rate: config.popUsdRate ?? 0.001,
           anti_cheat_enabled: config.antiCheatEnabled ?? true,
           miner_tiers: config.minerTiers || [],
@@ -420,8 +432,13 @@ export async function loadSystemSettingsFromMongo(): Promise<Partial<AdminConfig
     if (botUser.toLowerCase() === 'popcornusa_bot') {
       botUser = 'PopCornUSA_bot';
     }
-    const rawComm = doc.referral_commission_percent ?? (doc as any).squadCommissionRate ?? (doc.raw_config as any)?.squadCommissionRate ?? (doc.raw_config as any)?.referralCommissionPercent ?? 10;
-    const commRate = Math.max(0, Math.min(100, Number(rawComm)));
+    const rawComm = doc.referral_commission_percent ??
+      (doc as any).squadCommissionRate ??
+      (doc.raw_config as any)?.squadCommissionRate ??
+      (doc.raw_config as any)?.referralCommissionPercent;
+    const commRate = Number.isFinite(Number(rawComm))
+      ? Math.max(0, Math.min(100, Number(rawComm)))
+      : 0;
     return {
       mandatoryTelegramChannel: doc.mandatory_telegram_channel || '@PopCornUSA_BOT',
       mandatoryChannelLink: doc.mandatory_channel_link || 'https://t.me/PopCornUSA_BOT',
@@ -519,16 +536,17 @@ export async function getMyReferralsFromMongo(identifier: {
       return { counts: { total: 0, pending: 0, qualified: 0, same_ip: 0 }, referrals: [] };
     }
 
-    let adminBonus = 100;
+    let adminBonus = 0;
     try {
       const configDoc = await SystemSettingsModel.findOne({ key: 'admin_config' }).lean();
       if (configDoc) {
-        adminBonus = Number(
+        const configuredBonus = Number(
           configDoc.referral_bonus ??
           configDoc.instant_referral_bonus_pop ??
           (configDoc as any).referralBonusAmount ??
-          100
+          0
         );
+        adminBonus = Number.isFinite(configuredBonus) && configuredBonus >= 0 ? configuredBonus : 0;
       }
     } catch {}
 
@@ -821,16 +839,17 @@ export function getWeeklyCycleBounds(now: Date = new Date()): { startOfCycle: Da
 export async function autoReconcileReferralsInMongo(): Promise<void> {
   if (!isMongoConnected()) return;
   try {
-    let adminBonus = 100;
+    let adminBonus = 0;
     try {
       const configDoc = await SystemSettingsModel.findOne({ key: 'admin_config' }).lean();
       if (configDoc) {
-        adminBonus = Number(
+        const configuredBonus = Number(
           configDoc.referral_bonus ??
           configDoc.instant_referral_bonus_pop ??
           (configDoc as any).referralBonusAmount ??
-          100
+          0
         );
+        adminBonus = Number.isFinite(configuredBonus) && configuredBonus >= 0 ? configuredBonus : 0;
       }
     } catch {}
 
@@ -899,19 +918,6 @@ export async function getMongoWeeklyReferralLeaderboard(
   try {
     // 1. Auto-reconcile any verified referrals from UserModel to guarantee zero lag
     await autoReconcileReferralsInMongo();
-
-    let adminBonus = 100;
-    try {
-      const configDoc = await SystemSettingsModel.findOne({ key: 'admin_config' }).lean();
-      if (configDoc) {
-        adminBonus = Number(
-          configDoc.referral_bonus ??
-          configDoc.instant_referral_bonus_pop ??
-          (configDoc as any).referralBonusAmount ??
-          100
-        );
-      }
-    } catch {}
 
     const { startOfCycle, endOfCycle } = getWeeklyCycleBounds();
 
@@ -984,7 +990,8 @@ export async function getMongoWeeklyReferralLeaderboard(
           'inviterDoc.is_flagged': { $ne: true },
         },
       },
-      // 6. Project unified fields - STRICTLY calculate totalPopEarnings as: qualifiedReferralCount * adminSettings.referralBonus
+      // 6. Project the actual recorded referral bonuses. Do not synthesize
+      // earnings by multiplying the referral count by a configured amount.
       {
         $project: {
           _id: 0,
@@ -998,9 +1005,8 @@ export async function getMongoWeeklyReferralLeaderboard(
           qualifiedReferralCount: '$qualifiedReferralCount',
           referralCount: '$qualifiedReferralCount',
           earliestQualifiedDate: '$earliestQualifiedDate',
-          totalPopEarnings: {
-            $multiply: ['$qualifiedReferralCount', adminBonus],
-          },
+          totalBonusPop: '$totalBonusPop',
+          totalPopEarnings: '$totalBonusPop',
         },
       },
       // 7. Pure Dynamic Descending Ranking:
@@ -1036,7 +1042,8 @@ export async function getMongoWeeklyReferralLeaderboard(
         telegramId: item.telegramId,
         referralCount: item.qualifiedReferralCount,
         qualifiedReferralCount: item.qualifiedReferralCount,
-        totalPopEarnings: Math.round(item.qualifiedReferralCount * adminBonus),
+        totalBonusPop: Number(item.totalBonusPop ?? 0),
+        totalPopEarnings: Number(item.totalBonusPop ?? 0),
         earliestQualifiedDate: item.earliestQualifiedDate,
         prizeUsdt: prize,
         isCurrentUser: currentTelegramId ? String(item.telegramId) === String(currentTelegramId) : false,

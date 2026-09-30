@@ -12,8 +12,6 @@ export const SquadController = {
     const config = db.getConfig();
     const minThreshold = config.weeklyContestMinThreshold || 40;
     const prizes = config.weeklyPrizesUsdt || { first: 50, second: 30, third: 20 };
-    const adminSettings = await getActiveAdminReferralSettings();
-    const dynamicBonus = adminSettings.referralBonus;
 
     // 1. Fetch from MongoDB Atlas using the aggregation pipeline
     const mongoLeaderboard = await getMongoWeeklyReferralLeaderboard(currentTelegramId, minThreshold, prizes);
@@ -33,7 +31,7 @@ export const SquadController = {
             ...item,
             referralCount: count,
             qualifiedReferralCount: count,
-            totalPopEarnings: count * dynamicBonus,
+            totalPopEarnings: Number(item.totalBonusPop ?? 0),
           });
         }
       }
@@ -49,7 +47,7 @@ export const SquadController = {
           ...mItem,
           referralCount: mCount,
           qualifiedReferralCount: mCount,
-          totalPopEarnings: mCount * dynamicBonus,
+          totalPopEarnings: Number(mItem.totalPopEarnings ?? 0),
         });
       } else {
         const existCount = existing.qualifiedReferralCount ?? existing.referralCount ?? 0;
@@ -57,7 +55,6 @@ export const SquadController = {
           existing.referralCount = mCount;
           existing.qualifiedReferralCount = mCount;
         }
-        existing.totalPopEarnings = (existing.qualifiedReferralCount ?? existCount) * dynamicBonus;
         if (mItem.username && (!existing.username || existing.username.startsWith('user_'))) {
           existing.username = mItem.username;
         }
@@ -90,7 +87,10 @@ export const SquadController = {
       if (effectiveCount > 0) {
         const existing = combinedMap.get(tid);
         const myCount = effectiveCount;
-        const myPop = myCount * dynamicBonus;
+          const myPop = currentCycleQualifiedRefs.reduce(
+            (total, referral) => total + (Number(referral.bonusAwardedPOP) || 0),
+            0
+          );
         const earliestDate = currentCycleQualifiedRefs[0]?.qualifiedAt || currentCycleQualifiedRefs[0]?.created_at || currentCycleQualifiedRefs[0]?.joinedAt;
 
         if (!existing) {
@@ -111,7 +111,7 @@ export const SquadController = {
             existing.qualifiedReferralCount = myCount;
             existing.referralCount = myCount;
           }
-          existing.totalPopEarnings = (existing.qualifiedReferralCount ?? myCount) * dynamicBonus;
+            existing.totalPopEarnings = Math.max(Number(existing.totalPopEarnings) || 0, myPop);
           existing.isCurrentUser = true;
         }
       }
@@ -149,7 +149,7 @@ export const SquadController = {
         rank: idx + 1,
         referralCount: count,
         qualifiedReferralCount: count,
-        totalPopEarnings: Math.round(count * dynamicBonus),
+        totalPopEarnings: Number((Number(u.totalPopEarnings) || 0).toFixed(4)),
         prizeUsdt: prize,
         isCurrentUser: currentTelegramId ? String(u.telegramId) === String(currentTelegramId) : Boolean(u.isCurrentUser),
       };
@@ -374,7 +374,7 @@ export const SquadController = {
           existing.hasWallet = hasWallet;
           existing.hasChannel = hasChannel;
           if (isQual) {
-            existing.bonusAwardedPOP = dynamicBonus;
+            existing.bonusAwardedPOP = Number(existing.bonusAwardedPOP) || 0;
           } else {
             existing.bonusAwardedPOP = 0;
           }
@@ -392,7 +392,7 @@ export const SquadController = {
             hasChannel,
             hasMined: Boolean(mItem.hasMined),
             isMultiAccount: isUnqual,
-            bonusAwardedPOP: isQual ? dynamicBonus : 0,
+            bonusAwardedPOP: isQual ? (Number(mItem.bonusAwardedPOP) || 0) : 0,
             disqualifiedReason: mItem.disqualifiedReason,
             created_at: mItem.joinedAt || (mItem as any).created_at || new Date().toISOString(),
             joinedAt: mItem.joinedAt || (mItem as any).created_at || new Date().toISOString(),
@@ -445,7 +445,7 @@ export const SquadController = {
           isMultiAccount: isUnqual,
           hasWallet,
           hasChannel,
-          bonusAwardedPOP: isQual ? (r.bonusAwardedPOP > 0 ? r.bonusAwardedPOP : dynamicBonus) : 0,
+          bonusAwardedPOP: isQual ? (Number(r.bonusAwardedPOP) || 0) : 0,
         };
       }).sort(
         (a, b) => new Date(b.created_at || b.joinedAt).getTime() - new Date(a.created_at || a.joinedAt).getTime()

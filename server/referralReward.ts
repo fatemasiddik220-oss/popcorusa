@@ -10,10 +10,21 @@ export interface ReferralRewardResult {
   reason?: string;
 }
 
+function toNonNegativeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+export function calculateSquadMiningCommission(minedAmount: number, commissionRate: number): number {
+  const amount = toNonNegativeNumber(minedAmount);
+  const rate = Math.min(100, toNonNegativeNumber(commissionRate));
+  return Number(((amount * rate) / 100).toFixed(4));
+}
+
 /**
  * 1. STRICTLY DYNAMIC FROM ADMIN PANEL
  * Fetches the active referral bonus amount and squad commission rate dynamically from the Admin Panel.
- * Never hardcodes fixed numbers like 200 POP or 10%.
+ * Missing or invalid settings produce no reward rather than a synthetic fallback reward.
  */
 export async function getActiveAdminReferralSettings(): Promise<{ referralBonus: number; squadCommissionRate: number }> {
   let bonus: number | undefined;
@@ -39,12 +50,22 @@ export async function getActiveAdminReferralSettings(): Promise<{ referralBonus:
 
   const memConfig = db.getConfig() as any;
   if (bonus === undefined || isNaN(bonus) || bonus < 0) {
-    bonus = Number(memConfig.referralBonus ?? memConfig.referralBonusAmount ?? memConfig.referral_bonus ?? memConfig.instantReferralBonusPOP ?? 100);
+    bonus = toNonNegativeNumber(
+      memConfig.referralBonus ??
+      memConfig.referralBonusAmount ??
+      memConfig.referral_bonus ??
+      memConfig.instantReferralBonusPOP
+    );
   }
   if (commissionRate === undefined || isNaN(commissionRate) || commissionRate < 0) {
-    commissionRate = Number(memConfig.squadCommissionRate ?? memConfig.referralCommissionPercent ?? memConfig.referral_commission_percent ?? 10);
+    commissionRate = toNonNegativeNumber(
+      memConfig.squadCommissionRate ??
+      memConfig.referralCommissionPercent ??
+      memConfig.referral_commission_percent
+    );
   }
-  commissionRate = Math.max(0, Math.min(100, Number(commissionRate)));
+  bonus = toNonNegativeNumber(bonus);
+  commissionRate = Math.max(0, Math.min(100, toNonNegativeNumber(commissionRate)));
 
   return {
     referralBonus: bonus,

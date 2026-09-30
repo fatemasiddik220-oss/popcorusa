@@ -1138,13 +1138,15 @@ class DatabaseEngine {
           // SINGLE PAYOUT ONLY (NO DUPLICATES):
           // Check if referralBonusClaimed === true or bonusAwardedPOP > 0
           if (!target.referralBonusClaimed && (!target.bonusAwardedPOP || target.bonusAwardedPOP === 0)) {
-            const dynamicBonus = Number(
+            const configuredBonus = (
               (this.config as any).referralBonus ??
               (this.config as any).referralBonusAmount ??
               (this.config as any).referral_bonus ??
-              this.config.instantReferralBonusPOP ??
-              100
+              this.config.instantReferralBonusPOP
             );
+            const dynamicBonus = Number.isFinite(Number(configuredBonus)) && Number(configuredBonus) >= 0
+              ? Number(configuredBonus)
+              : 0;
 
             target.bonusAwardedPOP = dynamicBonus;
             target.referralBonusClaimed = true;
@@ -1245,7 +1247,7 @@ class DatabaseEngine {
           const rawRate = (this.config as any).squadCommissionRate ?? this.config.referralCommissionPercent;
           const commissionRate = rawRate !== undefined && rawRate !== null && !isNaN(Number(rawRate))
             ? Math.max(0, Math.min(100, Number(rawRate)))
-            : 10;
+            : 0;
 
           // Multiply referred user's actual mined amount by the exact dynamic admin percentage
           const commission = parseFloat(((amountToClaim * commissionRate) / 100).toFixed(4));
@@ -1847,14 +1849,6 @@ class DatabaseEngine {
         if (u.referrerId === inviter.id || u.referrerId === inviter.telegramId) {
           const exists = list.some(r => r.id === u.id || r.telegramId === u.telegramId);
           if (!exists) {
-            const adminBonus = Number(
-              (this.config as any).referralBonus ??
-              (this.config as any).referralBonusAmount ??
-              (this.config as any).referral_bonus ??
-              this.config.instantReferralBonusPOP ??
-              100
-            );
-
             list.push({
               id: u.id,
               telegramId: u.telegramId,
@@ -1879,14 +1873,6 @@ class DatabaseEngine {
       this.referrals.set(inviter.id, list);
       this.referrals.set(inviter.telegramId, list);
     }
-
-    const currentAdminBonus = Number(
-      (this.config as any).referralBonus ??
-      (this.config as any).referralBonusAmount ??
-      (this.config as any).referral_bonus ??
-      this.config.instantReferralBonusPOP ??
-      100
-    );
 
     return list.map(ref => {
       const u = this.users.get(ref.id) || this.users.get(ref.telegramId);
@@ -1948,7 +1934,7 @@ class DatabaseEngine {
         isMultiAccount: isSameIpMatch,
         isQualified: isQual,
         status: finalStatus as any,
-        bonusAwardedPOP: isQual ? (ref.bonusAwardedPOP > 0 ? ref.bonusAwardedPOP : currentAdminBonus) : 0,
+        bonusAwardedPOP: isQual ? (Number(ref.bonusAwardedPOP) || 0) : 0,
         referralBonusClaimed: isQual ? (ref.referralBonusClaimed ?? (ref.bonusAwardedPOP > 0)) : false,
         disqualifiedReason: isSameIpMatch ? (ref.disqualifiedReason || 'Same IP or Device match detected') : undefined,
       };
@@ -2037,14 +2023,10 @@ class DatabaseEngine {
       const qualifiedCount = qualifiedList.length;
       if (qualifiedCount === 0) return;
 
-      const adminBonus = Number(
-        (this.config as any).referralBonus ??
-        (this.config as any).referralBonusAmount ??
-        (this.config as any).referral_bonus ??
-        this.config.instantReferralBonusPOP ??
-        100
+      const totalPop = qualifiedList.reduce(
+        (total, referral) => total + (Number(referral.bonusAwardedPOP) || 0),
+        0
       );
-      const totalPop = qualifiedCount * adminBonus;
       const earliestDate = qualifiedList[0]?.qualifiedAt || qualifiedList[0]?.created_at || qualifiedList[0]?.joinedAt;
 
       list.push({
