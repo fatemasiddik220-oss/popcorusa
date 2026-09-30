@@ -19,7 +19,7 @@ const getManifestUrl = (): string => {
       // fallback
     }
   }
-  return 'https://popcron.ai.studio/tonconnect-manifest.json';
+  return 'https://popcorusa-production.up.railway.app/tonconnect-manifest.json';
 };
 
 const manifestUrl = getManifestUrl();

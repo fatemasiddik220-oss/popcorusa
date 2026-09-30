@@ -61,11 +61,11 @@ app.get(['/tonconnect-manifest.json', '/api/tonconnect-manifest.json'], (req: Re
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.json({
-    url: 'https://popcron.ai.studio/',
+    url: 'https://popcorusa-production.up.railway.app/',
     name: 'PopCorn USA Miner',
     iconUrl: 'https://i.postimg.cc/Dz4nR0Vn/1789724768957.png',
-    termsOfDeliveryUrl: 'https://popcron.ai.studio/',
-    privacyPolicyUrl: 'https://popcron.ai.studio/'
+    termsOfDeliveryUrl: 'https://popcorusa-production.up.railway.app/,
+    privacyPolicyUrl: 'https://popcorusa-production.up.railway.app/'
   });
 });
 
