@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTonConnectUI, useTonAddress } from '@tonconnect/ui-react';
 import { Header } from './components/Header.js';
 import { BottomNav, ActiveTab } from './components/BottomNav.js';
@@ -45,6 +45,7 @@ export function App() {
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isAdOpen, setIsAdOpen] = useState(false);
+  const claimAdLoadingRef = useRef(false);
 
   // Loading & Error
   const [loading, setLoading] = useState(true);
@@ -355,10 +356,101 @@ export function App() {
 
   // Before claiming mining rewards or upgrading, trigger an Adsgram rewarded ad using Adsgram SDK native onReward callback
   const handleClaimMining = async () => {
-    await adsProvider.showRewardedAd(async () => {
-      const res = await api.claimMining();
-      setUser(res.user);
-    });
+    if (claimAdLoadingRef.current) return;
+
+    const userId = String(user?.telegramId || user?.id || '').trim();
+    const dynamicBlockId = String(config?.adProviderSecret || '').trim();
+    const today = new Date().toISOString().slice(0, 10);
+    const storageKey = `pop_adsgram_reward_limit_${userId}`;
+    const cooldownMs = 2 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    let storedState: { date: string; count: number; lastAdAt: number } = {
+      date: today,
+      count: 0,
+      lastAdAt: 0,
+    };
+
+    try {
+      const savedState = localStorage.getItem(storageKey);
+      if (savedState) {
+        const parsedState = JSON.parse(savedState);
+        if (parsedState?.date === today) {
+          storedState = {
+            date: today,
+            count: Number(parsedState.count) || 0,
+            lastAdAt: Number(parsedState.lastAdAt) || 0,
+          };
+        }
+      }
+    } catch {
+      storedState = { date: today, count: 0, lastAdAt: 0 };
+    }
+
+    if (storedState.count >= 3) {
+      window.alert('Daily reward ad limit reached. You can watch up to 3 ads per day.');
+      return;
+    }
+
+    const cooldownRemainingMs = storedState.lastAdAt + cooldownMs - now;
+    if (storedState.lastAdAt > 0 && cooldownRemainingMs > 0) {
+      const remainingHours = Math.floor(cooldownRemainingMs / (60 * 60 * 1000));
+      const remainingMinutes = Math.ceil((cooldownRemainingMs % (60 * 60 * 1000)) / (60 * 1000));
+      window.alert(
+        `Please wait ${remainingHours > 0 ? `${remainingHours}h ` : ''}${remainingMinutes}m before watching another reward ad.`
+      );
+      return;
+    }
+
+    if (!dynamicBlockId) {
+      window.alert('Reward ads are not configured yet. Please try again later.');
+      return;
+    }
+
+    if (typeof window === 'undefined' || !window.Adsgram) {
+      window.alert('Reward ad is still loading. Please try again in a moment.');
+      return;
+    }
+
+    claimAdLoadingRef.current = true;
+
+    try {
+      return window.Adsgram.init({ blockId: dynamicBlockId })
+        .show()
+        .then(async (result) => {
+          if (!result?.done) {
+            window.alert('The reward ad was not completed. Please try again.');
+            return;
+          }
+
+          try {
+            localStorage.setItem(
+              storageKey,
+              JSON.stringify({
+                date: today,
+                count: storedState.count + 1,
+                lastAdAt: Date.now(),
+              })
+            );
+          } catch (storageErr) {
+            console.warn('Unable to persist Adsgram reward limit:', storageErr);
+          }
+
+          const res = await api.claimMining();
+          setUser(res.user);
+        })
+        .catch((err) => {
+          console.warn('Adsgram reward ad failed or was dismissed:', err);
+          window.alert('The reward ad could not be completed. Please try again.');
+        })
+        .finally(() => {
+          claimAdLoadingRef.current = false;
+        });
+    } catch (err) {
+      claimAdLoadingRef.current = false;
+      console.warn('Adsgram initialization failed:', err);
+      window.alert('The reward ad could not be opened. Please try again.');
+    }
   };
 
   const handleUpgradeMiner = async (targetLevel: number) => {
