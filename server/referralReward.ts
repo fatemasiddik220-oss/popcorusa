@@ -445,9 +445,6 @@ export async function verifyReferralStatus(params: {
         targetItem.hasWallet = true;
         targetItem.hasChannel = true;
         targetItem.isMultiAccount = false;
-        if (!targetItem.bonusAwardedPOP || targetItem.bonusAwardedPOP === 0) {
-          targetItem.bonusAwardedPOP = dynamicBonus;
-        }
       }
       return {
         success: true,
@@ -456,7 +453,7 @@ export async function verifyReferralStatus(params: {
         hasWallet: true,
         hasChannel: true,
         isUniqueIpDevice: true,
-        awardedBonus: targetItem?.bonusAwardedPOP || dynamicBonus,
+        awardedBonus: Number(targetItem?.bonusAwardedPOP ?? existingLog?.bonus_awarded ?? 0),
         referrerTelegramId: referrerId,
         reason: 'ALREADY_QUALIFIED',
       };
@@ -570,7 +567,7 @@ export async function verifyReferralStatus(params: {
       isUniqueIpDevice: true,
       awardedBonus: dynamicBonus,
       referrerTelegramId: referrerId,
-      newBalance: updatedPoints || (memReferrer ? memReferrer.balancePOP : dynamicBonus),
+      newBalance: updatedPoints || (memReferrer ? memReferrer.balancePOP : 0),
     };
   } catch (err: any) {
     console.error('[verifyReferralStatus Error]:', err?.message || err);

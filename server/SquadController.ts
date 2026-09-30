@@ -87,10 +87,10 @@ export const SquadController = {
       if (effectiveCount > 0) {
         const existing = combinedMap.get(tid);
         const myCount = effectiveCount;
-          const myPop = currentCycleQualifiedRefs.reduce(
-            (total, referral) => total + (Number(referral.bonusAwardedPOP) || 0),
-            0
-          );
+        const myPop = currentCycleQualifiedRefs.reduce(
+          (total, referral) => total + (Number(referral.bonusAwardedPOP) || 0),
+          0
+        );
         const earliestDate = currentCycleQualifiedRefs[0]?.qualifiedAt || currentCycleQualifiedRefs[0]?.created_at || currentCycleQualifiedRefs[0]?.joinedAt;
 
         if (!existing) {
@@ -111,7 +111,7 @@ export const SquadController = {
             existing.qualifiedReferralCount = myCount;
             existing.referralCount = myCount;
           }
-            existing.totalPopEarnings = Math.max(Number(existing.totalPopEarnings) || 0, myPop);
+          existing.totalPopEarnings = Math.max(Number(existing.totalPopEarnings) || 0, myPop);
           existing.isCurrentUser = true;
         }
       }

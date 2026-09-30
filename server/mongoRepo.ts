@@ -83,7 +83,7 @@ export function mapMongoDocToUser(doc: any): User {
     dailyStreak: doc.daily_streak || 0,
     lastCheckInDate: doc.last_checkin_date || null,
     totalMined: doc.points ?? 0,
-    squadCommissionRate: 10,
+    squadCommissionRate: 0,
     unclaimedSquadPOP: doc.unclaimed_squad_pop || 0,
     claimedSquadPOP: doc.claimed_squad_pop || 0,
     completedTasks: doc.completed_tasks || [],
@@ -536,20 +536,6 @@ export async function getMyReferralsFromMongo(identifier: {
       return { counts: { total: 0, pending: 0, qualified: 0, same_ip: 0 }, referrals: [] };
     }
 
-    let adminBonus = 0;
-    try {
-      const configDoc = await SystemSettingsModel.findOne({ key: 'admin_config' }).lean();
-      if (configDoc) {
-        const configuredBonus = Number(
-          configDoc.referral_bonus ??
-          configDoc.instant_referral_bonus_pop ??
-          (configDoc as any).referralBonusAmount ??
-          0
-        );
-        adminBonus = Number.isFinite(configuredBonus) && configuredBonus >= 0 ? configuredBonus : 0;
-      }
-    } catch {}
-
     // 1. Query all users from MongoDB whose referred_by matches any of the user's IDs or referral codes
     const userDocs = await UserModel.find({
       referred_by: { $in: searchKeys }
@@ -586,7 +572,7 @@ export async function getMyReferralsFromMongo(identifier: {
         hasChannel,
         hasMined: true,
         isMultiAccount: isUnqual,
-        bonusAwardedPOP: isQual ? adminBonus : 0,
+        bonusAwardedPOP: 0,
         disqualifiedReason: u.flagged_reason || undefined,
         created_at: u.created_at ? new Date(u.created_at).toISOString() : new Date().toISOString(),
         joinedAt: u.created_at ? new Date(u.created_at).toISOString() : new Date().toISOString(),
@@ -639,7 +625,7 @@ export async function getMyReferralsFromMongo(identifier: {
       else if (isQual) normalizedStatus = 'QUALIFIED';
       else normalizedStatus = 'PENDING';
 
-      const earnedBonus = (log.bonus_awarded && log.bonus_awarded > 0) ? log.bonus_awarded : (isQual ? adminBonus : 0);
+      const earnedBonus = Number(log.bonus_awarded) > 0 ? Number(log.bonus_awarded) : 0;
 
       if (existing) {
         // Overlay log verification specifics
@@ -839,20 +825,6 @@ export function getWeeklyCycleBounds(now: Date = new Date()): { startOfCycle: Da
 export async function autoReconcileReferralsInMongo(): Promise<void> {
   if (!isMongoConnected()) return;
   try {
-    let adminBonus = 0;
-    try {
-      const configDoc = await SystemSettingsModel.findOne({ key: 'admin_config' }).lean();
-      if (configDoc) {
-        const configuredBonus = Number(
-          configDoc.referral_bonus ??
-          configDoc.instant_referral_bonus_pop ??
-          (configDoc as any).referralBonusAmount ??
-          0
-        );
-        adminBonus = Number.isFinite(configuredBonus) && configuredBonus >= 0 ? configuredBonus : 0;
-      }
-    } catch {}
-
     const verifiedUsers = await UserModel.find({
       referred_by: { $exists: true, $ne: null },
       wallet_address: { $exists: true, $ne: null },
@@ -883,12 +855,12 @@ export async function autoReconcileReferralsInMongo(): Promise<void> {
             has_channel: true,
             status: 'QUALIFIED',
             reason: 'TON Wallet and Channel verified',
-            bonus_awarded: adminBonus,
-            referral_bonus_claimed: true,
             qualified_at: u.updated_at || u.created_at || new Date(),
           },
           $setOnInsert: {
             created_at: u.created_at || new Date(),
+            bonus_awarded: 0,
+            referral_bonus_claimed: false,
           }
         },
         { upsert: true }
@@ -906,7 +878,7 @@ export async function autoReconcileReferralsInMongo(): Promise<void> {
  * 2. ONLY QUALIFIED REFERRALS: status === 'QUALIFIED' / 'Qualified'.
  * 3. REAL-TIME ACCURACY: Dynamic aggregation over ReferralLogModel joined with UserModel.
  * 4. SORTING: Primary = qualifiedReferralCount (DESC), Secondary = totalPopEarnings (DESC), Tertiary = earliestQualifiedDate (ASC).
- * 5. EXCLUSIVE REFERRAL BONUS DISPLAY (NO COMMISSIONS): qualifiedReferralCount * adminSettings.referralBonus.
+ * 5. EXCLUSIVE REFERRAL BONUS DISPLAY (NO COMMISSIONS): sum of recorded qualification bonuses.
  */
 export async function getMongoWeeklyReferralLeaderboard(
   currentTelegramId?: string,

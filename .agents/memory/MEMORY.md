@@ -1,0 +1,1 @@
+- [Referral reward integrity](referral-reward-integrity.md) — use recorded payouts and exact percentage commissions; reconciliation must not synthesize or claim rewards.

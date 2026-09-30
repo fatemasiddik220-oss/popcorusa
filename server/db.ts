@@ -141,11 +141,11 @@ export const defaultAdminConfig: AdminConfig = {
     { tier: 5, name: 'Tier 5 Deep Cold Bunker', durationHours: 36, pricePOP: 1800, priceUSD: 1.80 },
     { tier: 6, name: 'Tier 6 Quantum Containment', durationHours: 48, pricePOP: 3500, priceUSD: 3.50 },
   ],
-  instantReferralBonusPOP: 100,
-  referral_bonus: 100,
-  referralBonusAmount: 100,
-  referralCommissionPercent: 10,
-  squadCommissionRate: 10,
+  instantReferralBonusPOP: 0,
+  referral_bonus: 0,
+  referralBonusAmount: 0,
+  referralCommissionPercent: 0,
+  squadCommissionRate: 0,
   weeklyContestMinThreshold: 40,
   weeklyPrizesUsdt: {
     first: 1.00, // $1.00 USDT value in POP
@@ -462,9 +462,13 @@ class DatabaseEngine {
   // Get Admin Configuration
   public getConfig(): AdminConfig {
     const rawBonus = (this.config as any).referralBonus ?? (this.config as any).referralBonusAmount ?? (this.config as any).referral_bonus ?? this.config.instantReferralBonusPOP;
-    const bonus = rawBonus !== undefined && rawBonus !== null && !isNaN(Number(rawBonus)) ? Number(rawBonus) : 100;
+    const bonus = rawBonus !== undefined && rawBonus !== null && Number.isFinite(Number(rawBonus)) && Number(rawBonus) >= 0
+      ? Number(rawBonus)
+      : 0;
     const rawComm = (this.config as any).squadCommissionRate ?? this.config.referralCommissionPercent;
-    const commRate = rawComm !== undefined && rawComm !== null && !isNaN(Number(rawComm)) ? Math.max(0, Math.min(100, Number(rawComm))) : 10;
+    const commRate = rawComm !== undefined && rawComm !== null && Number.isFinite(Number(rawComm))
+      ? Math.max(0, Math.min(100, Number(rawComm)))
+      : 0;
 
     let botUser = (this.config.telegramBotUsername || this.config.botUsername || process.env.TELEGRAM_BOT_USERNAME || 'PopCornUSA_bot').replace('@', '').trim() || 'PopCornUSA_bot';
     if (botUser.toLowerCase() === 'popcornusa_bot') {
