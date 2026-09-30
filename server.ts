@@ -64,7 +64,7 @@ app.get(['/tonconnect-manifest.json', '/api/tonconnect-manifest.json'], (req: Re
     url: 'https://popcorusa-production.up.railway.app/',
     name: 'PopCorn USA Miner',
     iconUrl: 'https://i.postimg.cc/Dz4nR0Vn/1789724768957.png',
-    termsOfDeliveryUrl: 'https://popcorusa-production.up.railway.app/,
+    termsOfDeliveryUrl: 'https://popcorusa-production.up.railway.app/',
     privacyPolicyUrl: 'https://popcorusa-production.up.railway.app/'
   });
 });
