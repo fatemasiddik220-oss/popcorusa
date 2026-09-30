@@ -143,7 +143,7 @@ bot.start(async (ctx) => {
 
 // Additional Bot Commands
 bot.command(['mine', 'balance'], async (ctx) => {
-  const webAppUrl = process.env.WEBAPP_URL || process.env.MINI_APP_URL || 'https://popcron.ai.studio/';
+  const webAppUrl = process.env.WEBAPP_URL || process.env.MINI_APP_URL || 'https://popcorusa-production.up.railway.app/';
   return ctx.replyWithHTML(`🍿 <b>POP Mining Status</b>\n\nTo view real-time unclaimed mining rewards and adjust your miner speed, open the Mini App:`, {
     reply_markup: {
       inline_keyboard: [
@@ -155,7 +155,7 @@ bot.command(['mine', 'balance'], async (ctx) => {
 
 bot.command('squad', async (ctx) => {
   const chatId = ctx.chat.id;
-  const webAppUrl = process.env.WEBAPP_URL || process.env.MINI_APP_URL || 'https://popcron.ai.studio/';
+  const webAppUrl = process.env.WEBAPP_URL || process.env.MINI_APP_URL || 'https://popcorusa-production.up.railway.app/';
   let user = db.getUser(chatId.toString());
   if (!user) {
     user = db.getOrCreateUser({
@@ -260,7 +260,7 @@ export class TelegramBotService {
   constructor() {
     this.token = BOT_TOKEN;
     this.adminChatId = ADMIN_CHAT_ID;
-    this.appUrl = process.env.WEBAPP_URL || process.env.MINI_APP_URL || 'https://popcron.ai.studio/';
+    this.appUrl = process.env.WEBAPP_URL || process.env.MINI_APP_URL || 'https://popcorusa-production.up.railway.app/';
   }
 
   /**
