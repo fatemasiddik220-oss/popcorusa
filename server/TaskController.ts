@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from './db.js';
 import { telegramBot } from './bot.js';
-
+const MAX_TOTAL_SUPPLY = 20000000;
 export class TaskController {
   /**
    * GET /api/tasks
@@ -85,11 +85,11 @@ export class TaskController {
         }
       }
 
-   // Complete task in database (validates claimDelayMinutes cooldown & single claim) 
+// Complete task in database (validates claimDelayMinutes cooldown & single claim) 
 const config = db.getConfig();
 const allTasks = (config.tasks && config.tasks.length > 0) ? config.tasks : [];
-const task = allTasks.find(t => t.id === taskId);
-const rewardAmount = task ? (task.reward || 0) : 0;
+const foundTask = allTasks.find(t => t.id === taskId);
+const rewardAmount = foundTask ? (foundTask.reward || 0) : 0;
 
 const currentDistributed = config.totalDistributed || 0;
 
@@ -97,13 +97,13 @@ if (currentDistributed + rewardAmount > MAX_TOTAL_SUPPLY) {
     return res.status(400).json({ success: false, message: "All POP tokens have been distributed!" });
 }
 
-    const result = db.completeTask(telegramId, taskId, elapsedSeconds ? Number(elapsedSeconds) : undefined);
-      res.json({
-        success: true,
-        user: result.user,
-        rewardPOP: result.rewardPOP,
-        message: `Task completed! +${result.rewardPOP} POP added to your balance!`
-      });
+const result = db.completeTask(telegramId, taskId, elapsedSeconds ? Number(elapsedSeconds) : undefined);
+res.json({
+    success: true,
+    user: result.user,
+    rewardPOP: result.rewardPOP,
+    message: `Task completed! +${result.rewardPOP} POP added to your balance!`
+});
     } catch (err: any) {
       const errMsg = err.message || 'Failed to complete task';
       const code = errMsg.includes('COOLDOWN_ACTIVE') ? 'COOLDOWN_ACTIVE' : 'TASK_ERROR';
