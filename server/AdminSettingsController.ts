@@ -27,7 +27,7 @@ export class AdminSettingsController {
           mandatoryChannelLink: config.mandatoryChannelLink || 'https://t.me/PopCornUSA_bot',
           channelUrl: config.channelUrl || 'https://t.me/PopCornUSA_bot',
           supportUsername: config.telegramSupportUsername || '@PopCornUSA_BOT',
-          welcomeBannerUrl: config.welcomeBannerUrl || 'https://i.postimg.cc/8c4vM4H8/banner.jpg',
+          welcomeBannerUrl: config.welcomeBannerUrl || 'https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png',
           minWithdrawAmount: config.minWithdrawAmount || 100,
           maxWithdrawAmount: config.maxWithdrawAmount || 50000,
           withdrawalFeePercent: config.withdrawalFeePercent || 5,

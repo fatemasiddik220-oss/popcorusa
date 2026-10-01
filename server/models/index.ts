@@ -363,7 +363,7 @@ const SystemSettingsSchema = new Schema<ISystemSettingsDocument>(
     },
     welcome_banner_url: {
       type: String,
-      default: 'https://i.postimg.cc/8c4vM4H8/banner.jpg',
+      default: 'https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png',
     },
     raw_config: {
       type: Schema.Types.Mixed,

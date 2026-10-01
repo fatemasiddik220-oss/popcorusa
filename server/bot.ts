@@ -12,7 +12,7 @@ interface TelegramUser {
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8944178413:AAGx6IvYCbD20tZRDf_YCVBLmmWdpQQZXcE';
 const ADMIN_CHAT_ID = process.env.ADMIN_TELEGRAM_ID || '7779827146';
-const WELCOME_BANNER_URL = process.env.WELCOME_BANNER || process.env.WELCOME_BANNER_URL || 'https://i.postimg.cc/8c4vM4H8/banner.jpg';
+const WELCOME_BANNER_URL = process.env.WELCOME_BANNER || process.env.WELCOME_BANNER_URL || 'https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png';
 
 // ======================================================================
 // TELEGRAF BOT INSTANCE & NON-BLOCKING DB HELPERS
@@ -111,7 +111,7 @@ bot.start(async (ctx) => {
 
   const imageUrl = process.env.WELCOME_BANNER && process.env.WELCOME_BANNER.startsWith('http')
     ? process.env.WELCOME_BANNER
-    : (process.env.WELCOME_BANNER_URL || 'https://i.postimg.cc/8c4vM4H8/banner.jpg');
+    : (process.env.WELCOME_BANNER_URL || 'https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png');
 
   try {
     await ctx.replyWithPhoto(imageUrl, {
@@ -122,9 +122,9 @@ bot.start(async (ctx) => {
   } catch (photoErr) {
     console.error('Photo Error:', photoErr);
     // If custom image failed, try reliable direct CDN banner
-    if (imageUrl !== 'https://i.postimg.cc/8c4vM4H8/banner.jpg') {
+    if (imageUrl !== 'https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png') {
       try {
-        await ctx.replyWithPhoto('https://i.postimg.cc/8c4vM4H8/banner.jpg', {
+        await ctx.replyWithPhoto('https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png', {
           caption: welcomeCaption,
           parse_mode: 'Markdown',
           reply_markup: keyboard

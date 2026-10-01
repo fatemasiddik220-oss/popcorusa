@@ -1135,7 +1135,7 @@
     "adProviderSecret": "12345",
     "interstitialAdIntervalMinutes": 5,
     "interstitialAdInitialDelayMinutes": 3,
-    "welcomeBannerUrl": "https://i.postimg.cc/8c4vM4H8/banner.jpg"
+    "welcomeBannerUrl": "https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png"
   },
   "savedAt": "2026-09-28T08:11:02.905Z"
 }

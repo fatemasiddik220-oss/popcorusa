@@ -405,7 +405,7 @@ export async function saveSystemSettingsToMongo(config: AdminConfig): Promise<vo
           weekly_contest_min_threshold: config.weeklyContestMinThreshold ?? 40,
           weekly_prizes_usdt: config.weeklyPrizesUsdt || { first: 1.0, second: 0.6, third: 0.3 },
           support_username: config.telegramSupportUsername || '@PopCornUSA_BOT',
-          welcome_banner_url: config.welcomeBannerUrl || 'https://i.postimg.cc/8c4vM4H8/banner.jpg',
+          welcome_banner_url: config.welcomeBannerUrl ||'https://raw.githubusercontent.com/sbsujon213/Image/main/1789792124086.png',
           raw_config: config,
           updated_at: new Date(),
         },
