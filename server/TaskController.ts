@@ -87,7 +87,6 @@ export class TaskController {
 
 // Complete task in database (validates claimDelayMinutes cooldown & single claim) 
 const config = db.getConfig();
-const allTasks = (config.tasks && config.tasks.length > 0) ? config.tasks : [];
 const foundTask = allTasks.find(t => t.id === taskId);
 const rewardAmount = foundTask ? (foundTask.reward || 0) : 0;
 
