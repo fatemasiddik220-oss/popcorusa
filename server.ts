@@ -27,7 +27,7 @@ const PORT = 3000;
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '7779827146';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || process.env.ADMIN_SECRET_KEY || 'Sujonborsha';
 const JWT_SECRET = process.env.JWT_SECRET || 'Sujonborsha';
-
+const MAX_TOTAL_SUPPLY = 20000000;
 app.use(express.json());
 
 // Helper to extract client IP and generate deterministic device fingerprint (IP + UA + client device token)
@@ -52,7 +52,21 @@ function getClientInfo(req: Request) {
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'POP Telegram Mini App Engine', timestamp: new Date().toISOString() });
 });
+app.get('/api/admin/token-stats', async (req, res) => {
+    try {
+        const totalDistributed = 0; 
+        const remainingSupply = MAX_TOTAL_SUPPLY - totalDistributed;
 
+        res.json({
+            success: true,
+            maxSupply: MAX_TOTAL_SUPPLY,
+            totalDistributed: totalDistributed,
+            remainingSupply: remainingSupply
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: "Internal server error" });
+    }
+});
 // Dynamic TON Connect Manifest with Full CORS Support
 app.get(['/tonconnect-manifest.json', '/api/tonconnect-manifest.json'], (req: Request, res: Response) => {
   res.setHeader('Access-Control-Allow-Origin', '*');

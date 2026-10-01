@@ -85,8 +85,19 @@ export class TaskController {
         }
       }
 
-      // Complete task in database (validates claimDelayMinutes cooldown & single claim)
-      const result = db.completeTask(telegramId, taskId, elapsedSeconds ? Number(elapsedSeconds) : undefined);
+   // Complete task in database (validates claimDelayMinutes cooldown & single claim) 
+const config = db.getConfig();
+const allTasks = (config.tasks && config.tasks.length > 0) ? config.tasks : [];
+const task = allTasks.find(t => t.id === taskId);
+const rewardAmount = task ? (task.reward || 0) : 0;
+
+const currentDistributed = config.totalDistributed || 0;
+
+if (currentDistributed + rewardAmount > MAX_TOTAL_SUPPLY) {
+    return res.status(400).json({ success: false, message: "All POP tokens have been distributed!" });
+}
+
+    const result = db.completeTask(telegramId, taskId, elapsedSeconds ? Number(elapsedSeconds) : undefined);
       res.json({
         success: true,
         user: result.user,
