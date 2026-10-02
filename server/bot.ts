@@ -271,6 +271,7 @@ export class TelegramBotService {
     if (!initData) {
       return { isValid: false };
     }
+    
 
     try {
       const urlParams = new URLSearchParams(initData);

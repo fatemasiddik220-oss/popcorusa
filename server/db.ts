@@ -167,7 +167,7 @@ export const defaultAdminConfig: AdminConfig = {
   antiCheatEnabled: true,
   tasks: defaultEcosystemTasks,
   adProvider: (process.env.AD_PROVIDER as any) || 'adsgram',
-  adProviderSecret: process.env.AD_PROVIDER_SECRET || '12345',
+  adProviderSecret: process.env.AD_PROVIDER_SECRET || '50936',
   interstitialAdIntervalMinutes: 5,
   interstitialAdInitialDelayMinutes: 3,
 };
