@@ -761,9 +761,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   });
 
   const effectiveMaxSupply = tokenStats?.maxSupply ?? statsData?.maxTotalSupply ?? config.maxTotalSupply ?? 10000000;
-  const effectiveDistributed = tokenStats?.totalDistributed ?? statsData?.totalDistributed ?? config.totalDistributed ?? 
-    (usersList.reduce((acc, u) => acc + (u.balancePOP || 0), 0) + withdrawals.filter(w => w.status !== 'REJECTED').reduce((acc, w) => acc + (w.amountPOP || 0), 0));
-  const effectiveRemaining = tokenStats?.remainingSupply ?? statsData?.remainingSupply ?? Math.max(0, effectiveMaxSupply - effectiveDistributed);
+  const effectiveDistributed = (tokenStats?.totalDistributed !== undefined && tokenStats.totalDistributed > 0)
+    ? tokenStats.totalDistributed
+    : (statsData?.totalDistributed !== undefined && statsData.totalDistributed > 0)
+    ? statsData.totalDistributed
+    : (usersList.reduce((acc, u) => acc + (u.balancePOP || 0), 0) + withdrawals.filter(w => w.status !== 'REJECTED').reduce((acc, w) => acc + (w.amountPOP || 0), 0));
+  const effectiveRemaining = (tokenStats?.remainingSupply !== undefined && tokenStats.remainingSupply < effectiveMaxSupply)
+    ? tokenStats.remainingSupply
+    : (statsData?.remainingSupply !== undefined && statsData.remainingSupply < effectiveMaxSupply)
+    ? statsData.remainingSupply
+    : Math.max(0, effectiveMaxSupply - effectiveDistributed);
   const effectivePercent = effectiveMaxSupply > 0 ? Math.min(100, Math.max(0, (effectiveDistributed / effectiveMaxSupply) * 100)) : 0;
   const effectiveIsCapReached = effectiveRemaining <= 0 || Boolean(tokenStats?.isCapReached ?? statsData?.isCapReached ?? config.isCapReached);
 
@@ -1041,7 +1048,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="p-3 rounded-2xl bg-[#0B0E14] border border-[#1E2638] flex flex-col justify-between">
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Total Miners</span>
                   <div className="flex items-baseline justify-between mt-1">
-                    <span className="text-base font-black font-mono-digits text-white">{statsData?.totalUsers ?? usersList.length}</span>
+                    <span className="text-base font-black font-mono-digits text-white">
+                      {statsData?.totalUsers || usersList.length || analytics?.totalUsers || 0}
+                    </span>
                     <span className="text-[10px] text-emerald-400 font-bold">● Active</span>
                   </div>
                 </div>
@@ -1056,7 +1065,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Mined POP</span>
                   <div className="flex items-baseline justify-between mt-1">
                     <span className="text-base font-black font-mono-digits text-[#FFE600] truncate">
-                      {statsData?.totalMined ? Math.floor(statsData.totalMined).toLocaleString() : '0'}
+                      {Math.floor(statsData?.totalMined || analytics?.totalMinedPOP || usersList.reduce((acc, u) => acc + (u.totalMined || 0), 0) || 0).toLocaleString()}
                     </span>
                     <span className="text-[10px] text-gray-400 font-mono-digits">POP</span>
                   </div>
@@ -1729,7 +1738,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <Users className="w-3.5 h-3.5 text-[#00E5FF]" />
                   </div>
                   <div className="text-xl font-black text-white font-mono-digits">
-                    {statsData?.totalUsers ?? analytics?.totalUsers ?? usersList.length}
+                    {statsData?.totalUsers || analytics?.totalUsers || usersList.length || 0}
                   </div>
                   <div className="text-[10px] text-emerald-400 flex items-center gap-0.5 mt-0.5 font-semibold">
                     <TrendingUp className="w-2.5 h-2.5" /> Live accounts
@@ -1757,7 +1766,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <Award className="w-3.5 h-3.5 text-[#FFE600]" />
                   </div>
                   <div className="text-xl font-black text-[#FFE600] font-mono-digits">
-                    {(statsData?.totalMined ?? analytics?.totalMinedPOP ?? 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
+                    {(statsData?.totalMined || analytics?.totalMinedPOP || usersList.reduce((acc, u) => acc + (u.totalMined || 0), 0) || 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 })}
                   </div>
                   <div className="text-[10px] text-gray-400 font-mono-digits mt-0.5">
                     $POP produced

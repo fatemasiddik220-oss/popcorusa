@@ -338,22 +338,52 @@ export function App() {
     };
   }, [config?.interstitialAdInitialDelayMinutes, config?.interstitialAdIntervalMinutes]);
 
-  // Auto-trigger an Adsgram rewarded video ad 2-3 seconds after launching the Web App (like MRG Miner)
+  // 1. Dynamic Bot Open / Startup Ad according to Admin Panel settings
   useEffect(() => {
-    const launchRewardedAdTimer = setTimeout(() => {
-      console.log('[Adsgram] Auto-triggering rewarded video ad (2.5s post-launch)...');
+    if (!user) return;
+    const userId = String(user.telegramId || user.id || '').trim();
+    if (!userId) return;
+
+    const activeProvider = (config?.adProvider || 'adsgram').toLowerCase();
+    const delayMinutes = activeProvider === 'adsgram'
+      ? (config?.adsgramInitialDelayMinutes ?? config?.interstitialAdInitialDelayMinutes ?? 3)
+      : (config?.monetagInitialDelayMinutes ?? config?.interstitialAdInitialDelayMinutes ?? 3);
+    const startupDailyLimit = activeProvider === 'adsgram'
+      ? (config?.adsgramStartupDailyLimit ?? 1)
+      : (config?.monetagStartupDailyLimit ?? 1);
+
+    if (startupDailyLimit <= 0) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const storageKey = `pop_startup_ad_${userId}_${today}`;
+    let viewedToday = 0;
+    try {
+      viewedToday = parseInt(localStorage.getItem(storageKey) || '0', 10) || 0;
+    } catch {}
+
+    if (viewedToday >= startupDailyLimit) {
+      console.log(`[Ad System] Startup ad daily limit reached (${viewedToday}/${startupDailyLimit}) for today.`);
+      return;
+    }
+
+    const delayMs = Math.max(1000, delayMinutes * 60 * 1000);
+    const timer = setTimeout(() => {
+      console.log(`[Ad System] Triggering startup ad after ${delayMinutes}m delay...`);
       adsProvider.showRewardedAd(
         () => {
-          console.log('[Adsgram] Auto-launch rewarded ad completed.');
+          try {
+            localStorage.setItem(storageKey, String(viewedToday + 1));
+          } catch {}
+          console.log('[Ad System] Startup ad completed and recorded.');
         },
         (err) => {
-          console.log('[Adsgram] Auto-launch ad dismissed or skipped:', err);
+          console.log('[Ad System] Startup ad dismissed or skipped:', err);
         }
       ).catch(() => {});
-    }, 2500);
+    }, delayMs);
 
-    return () => clearTimeout(launchRewardedAdTimer);
-  }, []);
+    return () => clearTimeout(timer);
+  }, [user?.id, user?.telegramId, config?.adProvider, config?.adsgramInitialDelayMinutes, config?.adsgramStartupDailyLimit, config?.monetagInitialDelayMinutes, config?.monetagStartupDailyLimit]);
 
   // Handlers for App Actions
   // Automatically trigger mining start once a user connects TON Wallet AND joins official Telegram channel
@@ -369,102 +399,75 @@ export function App() {
     }
   }, [user?.tonWalletAddress, user?.hasJoinedChannel, user?.hasStartedMining]);
 
-  // Before claiming mining rewards or upgrading, trigger an Adsgram rewarded ad using Adsgram SDK native onReward callback
+  // Dynamic Claim Mining Reward handler:
+  // - Fixed 2-hour cooldown is COMPLETELY REMOVED.
+  // - Users can tap and claim freely according to the admin panel ad limit.
+  // - When ads are available under the daily limit, tapping claim shows the ad.
+  // - When the ad limit is exhausted, tapping claim allows claiming without any forced cooldown or error blocking them.
   const handleClaimMining = async () => {
     if (claimAdLoadingRef.current) return;
 
     const userId = String(user?.telegramId || user?.id || '').trim();
-    const dynamicBlockId = String(config?.adProviderSecret || '').trim();
     const today = new Date().toISOString().slice(0, 10);
-    const storageKey = `pop_adsgram_reward_limit_${userId}`;
-    const cooldownMs = 2 * 60 * 60 * 1000;
-    const now = Date.now();
+    const storageKey = `pop_claim_ad_limit_${userId}_${today}`;
 
-    let storedState: { date: string; count: number; lastAdAt: number } = {
-      date: today,
-      count: 0,
-      lastAdAt: 0,
-    };
+    // Dynamic claim ad limit from Admin Panel (adsgramClaimDailyLimit / monetagClaimDailyLimit)
+    const activeProvider = (config?.adProvider || 'adsgram').toLowerCase();
+    const claimDailyLimit = activeProvider === 'adsgram'
+      ? (config?.adsgramClaimDailyLimit ?? 1)
+      : (config?.monetagClaimDailyLimit ?? 1);
 
+    let claimAdCount = 0;
     try {
-      const savedState = localStorage.getItem(storageKey);
-      if (savedState) {
-        const parsedState = JSON.parse(savedState);
-        if (parsedState?.date === today) {
-          storedState = {
-            date: today,
-            count: Number(parsedState.count) || 0,
-            lastAdAt: Number(parsedState.lastAdAt) || 0,
-          };
-        }
+      const savedCount = localStorage.getItem(storageKey);
+      if (savedCount) {
+        claimAdCount = parseInt(savedCount, 10) || 0;
       }
     } catch {
-      storedState = { date: today, count: 0, lastAdAt: 0 };
-    }
-
-    if (storedState.count >= 3) {
-      window.alert('Daily reward ad limit reached. You can watch up to 3 ads per day.');
-      return;
-    }
-
-    const cooldownRemainingMs = storedState.lastAdAt + cooldownMs - now;
-    if (storedState.lastAdAt > 0 && cooldownRemainingMs > 0) {
-      const remainingHours = Math.floor(cooldownRemainingMs / (60 * 60 * 1000));
-      const remainingMinutes = Math.ceil((cooldownRemainingMs % (60 * 60 * 1000)) / (60 * 1000));
-      window.alert(
-        `Please wait ${remainingHours > 0 ? `${remainingHours}h ` : ''}${remainingMinutes}m before watching another reward ad.`
-      );
-      return;
-    }
-
-    if (!dynamicBlockId) {
-      window.alert('Reward ads are not configured yet. Please try again later.');
-      return;
-    }
-
-    if (typeof window === 'undefined' || !window.Adsgram) {
-      window.alert('Reward ad is still loading. Please try again in a moment.');
-      return;
+      claimAdCount = 0;
     }
 
     claimAdLoadingRef.current = true;
 
+    const executeClaim = async () => {
+      try {
+        const res = await api.claimMining();
+        setUser(res.user);
+      } catch (err: any) {
+        console.warn('Mining claim failed:', err);
+        // Do not throw generic blocking alert
+      } finally {
+        claimAdLoadingRef.current = false;
+      }
+    };
+
+    // If ad limit is exhausted or disabled (<= 0), claim immediately without showing ad or cooldown
+    if (claimDailyLimit <= 0 || claimAdCount >= claimDailyLimit) {
+      console.log(`[Claim Reward] Ad limit exhausted (${claimAdCount}/${claimDailyLimit}). Claiming directly without ad.`);
+      await executeClaim();
+      return;
+    }
+
+    // Ads are available based on the limit: show rewarded ad, then claim
     try {
-      return window.Adsgram.init({ blockId: dynamicBlockId })
-        .show()
-        .then(async (result) => {
-          if (!result?.done) {
-            window.alert('The reward ad was not completed. Please try again.');
-            return;
-          }
-
+      await adsProvider.showRewardedAd(
+        async () => {
           try {
-            localStorage.setItem(
-              storageKey,
-              JSON.stringify({
-                date: today,
-                count: storedState.count + 1,
-                lastAdAt: Date.now(),
-              })
-            );
+            localStorage.setItem(storageKey, String(claimAdCount + 1));
           } catch (storageErr) {
-            console.warn('Unable to persist Adsgram reward limit:', storageErr);
+            console.warn('Unable to persist claim ad count:', storageErr);
           }
-
-          const res = await api.claimMining();
-          setUser(res.user);
-        })
-        .catch((err) => {
-          console.warn('Adsgram reward ad failed or was dismissed:', err);
-          window.alert('The reward ad could not be completed. Please try again.');
-        })
-        .finally(() => {
-          claimAdLoadingRef.current = false;
-        });
+          await executeClaim();
+        },
+        async (err) => {
+          console.warn('Reward ad dismissed or unavailable, proceeding to claim:', err);
+          // If ad could not be shown/completed, still allow user to claim without blocking them
+          await executeClaim();
+        }
+      );
     } catch (err) {
-      claimAdLoadingRef.current = false;
-      console.warn('Adsgram initialization failed:', err);
-      window.alert('The reward ad could not be opened. Please try again.');
+      console.warn('Ad provider error on claim:', err);
+      await executeClaim();
     }
   };
 

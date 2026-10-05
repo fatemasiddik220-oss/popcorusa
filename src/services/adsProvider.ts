@@ -65,8 +65,7 @@ class AdsProviderService {
     this.currentSecret = sanitizedSecret;
 
     if (dailyCap !== undefined && !isNaN(Number(dailyCap))) {
-      // Clamp between 3 and 5 ads per day
-      this.dailyCap = Math.max(3, Math.min(5, Number(dailyCap)));
+      this.dailyCap = Math.max(0, Number(dailyCap));
     }
 
     if (isNew) {

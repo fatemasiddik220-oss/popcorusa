@@ -27,7 +27,7 @@ const PORT = 3000;
 const ADMIN_TELEGRAM_ID = process.env.ADMIN_TELEGRAM_ID || '7779827146';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || process.env.ADMIN_SECRET_KEY || 'Sujonborsha';
 const JWT_SECRET = process.env.JWT_SECRET || 'Sujonborsha';
-const MAX_TOTAL_SUPPLY = 20000000;
+const MAX_TOTAL_SUPPLY = 10000000;
 app.use(express.json());
 
 // Helper to extract client IP and generate deterministic device fingerprint (IP + UA + client device token)
@@ -52,20 +52,36 @@ function getClientInfo(req: Request) {
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'POP Telegram Mini App Engine', timestamp: new Date().toISOString() });
 });
-app.get('/api/admin/token-stats', async (req, res) => {
-    try {
-        const totalDistributed = 0; 
-        const remainingSupply = MAX_TOTAL_SUPPLY - totalDistributed;
+app.get(['/api/admin/token-stats', '/api/tokens/stats'], async (req: Request, res: Response) => {
+  try {
+    const stats = db.getAdminStats();
+    const allUsers = db.getAllUsers();
+    const completedWds = db.getWithdrawals().filter(w => w.status === 'COMPLETED' || w.status === 'APPROVED');
+    const totalWithdrawn = completedWds.reduce((sum, w) => sum + (w.amountPOP || 0), 0);
+    const userBalances = allUsers.reduce((sum, u) => sum + (u.balancePOP || 0), 0);
+    const totalMined = allUsers.reduce((sum, u) => sum + (u.totalMined || 0), 0);
 
-        res.json({
-            success: true,
-            maxSupply: MAX_TOTAL_SUPPLY,
-            totalDistributed: totalDistributed,
-            remainingSupply: remainingSupply
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, error: "Internal server error" });
-    }
+    const totalDistributed = parseFloat((userBalances + totalWithdrawn).toFixed(4));
+    const remainingSupply = Math.max(0, parseFloat((MAX_TOTAL_SUPPLY - totalDistributed).toFixed(4)));
+    const isCapReached = remainingSupply <= 0;
+
+    res.json({
+      success: true,
+      maxSupply: MAX_TOTAL_SUPPLY,
+      maxTotalSupply: MAX_TOTAL_SUPPLY,
+      totalDistributed,
+      remainingSupply,
+      totalCirculating: parseFloat(userBalances.toFixed(4)),
+      circulatingSupply: parseFloat(userBalances.toFixed(4)),
+      totalMined: parseFloat(totalMined.toFixed(4)),
+      totalUsers: allUsers.length || stats.totalUsers,
+      activeMiners: stats.activeMiners,
+      totalWithdrawn: parseFloat(totalWithdrawn.toFixed(4)),
+      isCapReached
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || "Internal server error" });
+  }
 });
 // Dynamic TON Connect Manifest with Full CORS Support
 app.get(['/tonconnect-manifest.json', '/api/tonconnect-manifest.json'], (req: Request, res: Response) => {
@@ -708,17 +724,48 @@ app.get('/api/admin/overview', checkAdminAuth, (req: Request, res: Response) => 
 app.get('/api/admin/stats', checkAdminAuth, (req: Request, res: Response) => {
   try {
     const stats = db.getAdminStats();
+    const allUsers = db.getAllUsers();
+    const completedWds = db.getWithdrawals().filter(w => w.status === 'COMPLETED' || w.status === 'APPROVED');
+    const totalWithdrawn = completedWds.reduce((sum, w) => sum + (w.amountPOP || 0), 0);
+    const userBalances = allUsers.reduce((sum, u) => sum + (u.balancePOP || 0), 0);
+    const totalMined = allUsers.reduce((sum, u) => sum + (u.totalMined || 0), 0);
+
+    const totalDistributed = parseFloat((userBalances + totalWithdrawn).toFixed(4));
+    const remainingSupply = Math.max(0, parseFloat((MAX_TOTAL_SUPPLY - totalDistributed).toFixed(4)));
+    const isCapReached = remainingSupply <= 0;
+
+    const tokenStatsObj = {
+      success: true,
+      maxSupply: MAX_TOTAL_SUPPLY,
+      maxTotalSupply: MAX_TOTAL_SUPPLY,
+      totalDistributed,
+      remainingSupply,
+      totalCirculating: parseFloat(userBalances.toFixed(4)),
+      circulatingSupply: parseFloat(userBalances.toFixed(4)),
+      totalMined: parseFloat(totalMined.toFixed(4)),
+      totalUsers: allUsers.length || stats.totalUsers,
+      activeMiners: stats.activeMiners,
+      totalWithdrawn: parseFloat(totalWithdrawn.toFixed(4)),
+      isCapReached
+    };
+
     res.json({
       success: true,
-      totalUsers: stats.totalUsers,
+      totalUsers: allUsers.length || stats.totalUsers,
       activeMiners: stats.activeMiners,
-      totalMined: stats.totalMined,
+      totalMined: parseFloat(totalMined.toFixed(4)),
       totalWithdrawals: stats.totalWithdrawals,
-      totalCirculating: stats.totalCirculating,
+      totalCirculating: parseFloat(userBalances.toFixed(4)),
       pendingWithdrawalsCount: stats.pendingWithdrawalsCount,
       pendingWithdrawalsAmount: stats.pendingWithdrawalsAmount,
       totalQualifiedReferrals: stats.totalQualifiedReferrals,
-      totalUnqualifiedReferrals: stats.totalUnqualifiedReferrals
+      totalUnqualifiedReferrals: stats.totalUnqualifiedReferrals,
+      maxTotalSupply: MAX_TOTAL_SUPPLY,
+      maxSupply: MAX_TOTAL_SUPPLY,
+      totalDistributed,
+      remainingSupply,
+      isCapReached,
+      tokenStats: tokenStatsObj
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
