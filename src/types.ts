@@ -180,6 +180,20 @@ export interface AdminUserListItem extends User {
   isActiveMiner: boolean;
 }
 
+export interface TokenSupplyStats {
+  success?: boolean;
+  maxTotalSupply?: number;
+  maxSupply?: number;
+  totalDistributed?: number;
+  remainingSupply?: number;
+  isCapReached?: boolean;
+  circulatingSupply?: number;
+  totalCirculating?: number;
+  totalMined?: number;
+  totalWithdrawn?: number;
+  error?: string;
+}
+
 export interface AdminStatsResponse {
   success: boolean;
   totalUsers: number;
@@ -191,6 +205,11 @@ export interface AdminStatsResponse {
   pendingWithdrawalsAmount?: number;
   totalQualifiedReferrals?: number;
   totalUnqualifiedReferrals?: number;
+  tokenStats?: TokenSupplyStats;
+  maxTotalSupply?: number;
+  totalDistributed?: number;
+  remainingSupply?: number;
+  isCapReached?: boolean;
   error?: string;
 }
 
@@ -221,6 +240,7 @@ export interface AdminConfig {
     second: number; // 0.60
     third: number;  // 0.30
   };
+  weeklyContestNoticeText?: string;
   withdrawalFeePercent: number; // e.g. 5%
   minWithdrawAmount: number; // Minimum withdrawal amount in POP (e.g. 100)
   maxWithdrawAmount: number; // Maximum withdrawal amount in POP (e.g. 50000)
@@ -241,6 +261,18 @@ export interface AdminConfig {
   adsDailyCap?: number; // Daily frequency cap (e.g. 4, range 3 to 5)
   interstitialAdIntervalMinutes: number; // default 5
   interstitialAdInitialDelayMinutes: number; // default 3
+  adsgramBlockId?: string;
+  adsgramInitialDelayMinutes?: number;
+  adsgramStartupDailyLimit?: number;
+  adsgramClaimDailyLimit?: number;
+  monetagZoneId?: string;
+  monetagInitialDelayMinutes?: number;
+  monetagStartupDailyLimit?: number;
+  monetagClaimDailyLimit?: number;
+  maxTotalSupply?: number;
+  totalDistributed?: number;
+  remainingSupply?: number;
+  isCapReached?: boolean;
 }
 
 export interface AuditLog {

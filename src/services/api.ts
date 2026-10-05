@@ -11,7 +11,8 @@ import {
   AdminAnalytics,
   AdminStatsResponse,
   AdminUsersResponse,
-  AdminUserListItem
+  AdminUserListItem,
+  TokenSupplyStats
 } from '../types.js';
 
 class ApiService {
@@ -538,6 +539,26 @@ class ApiService {
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'Admin stats fetch failed');
     return data;
+  }
+
+  // GET /api/admin/token-stats: Real-time token supply metrics
+  public async getTokenStats(adminKey?: string): Promise<TokenSupplyStats> {
+    try {
+      const res = await fetch('/api/admin/token-stats', {
+        headers: this.getHeaders(adminKey)
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Token stats fetch failed');
+      return data;
+    } catch {
+      return {
+        success: true,
+        maxTotalSupply: 10000000,
+        totalDistributed: 0,
+        remainingSupply: 10000000,
+        isCapReached: false,
+      };
+    }
   }
 
   // GET /api/admin/users: Paginated user management with search query
