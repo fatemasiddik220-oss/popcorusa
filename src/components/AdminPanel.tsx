@@ -4138,17 +4138,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </label>
                       <input
                         type="number"
-                        min="1"
-                        value={editableConfig.adsgramInitialDelayMinutes ?? 3}
-                        onChange={(e) => setEditableConfig({
-                          ...editableConfig,
-                          adsgramInitialDelayMinutes: Math.max(1, parseInt(e.target.value) || 3),
-                          interstitialAdInitialDelayMinutes: Math.max(1, parseInt(e.target.value) || 3)
-                        })}
+                        min="0"
+                        value={editableConfig.adsgramInitialDelayMinutes ?? 0}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value) || 0);
+                          setEditableConfig({
+                            ...editableConfig,
+                            adsgramInitialDelayMinutes: val,
+                            interstitialAdInitialDelayMinutes: val
+                          });
+                        }}
                         className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
                       />
                       <span className="text-[10px] text-cyan-300 mt-1 block">
-                        Strict 3-min rule: Ad displays ONLY after 3 minutes.
+                        Dynamic delay: 0 for instant, or enter minutes (e.g. 1, 2, 5).
                       </span>
                     </div>
 
@@ -4293,16 +4296,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </label>
                       <input
                         type="number"
-                        min="1"
-                        value={editableConfig.monetagInitialDelayMinutes ?? 3}
+                        min="0"
+                        value={editableConfig.monetagInitialDelayMinutes ?? 0}
                         onChange={(e) => setEditableConfig({
                           ...editableConfig,
-                          monetagInitialDelayMinutes: Math.max(1, parseInt(e.target.value) || 3)
+                          monetagInitialDelayMinutes: Math.max(0, parseInt(e.target.value) || 0)
                         })}
                         className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
                       />
                       <span className="text-[10px] text-amber-300 mt-1 block">
-                        Delay after entering bot (default: 3 minutes).
+                        Dynamic delay: 0 for instant, or enter minutes (e.g. 1, 2, 5).
                       </span>
                     </div>
 

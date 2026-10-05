@@ -10,7 +10,6 @@ import { TabLeaderboard } from './components/TabLeaderboard.js';
 import { TabWallet } from './components/TabWallet.js';
 import { ChannelJoinModal } from './components/ChannelJoinModal.js';
 import { AdminPanel } from './components/AdminPanel.js';
-import { InterstitialAd } from './components/InterstitialAd.js';
 import { api } from './services/api.js';
 import { haptic } from './services/haptic.js';
 import { adsProvider } from './services/adsProvider.js';
@@ -44,7 +43,6 @@ export function App() {
   // Modals
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isAdOpen, setIsAdOpen] = useState(false);
   const claimAdLoadingRef = useRef(false);
 
   // Loading & Error
@@ -314,40 +312,18 @@ export function App() {
     }
   }, [activeTab, user?.id]);
 
-  // 2. Interstitial Ads Schedule:
-  // 1st ad triggers 3 minutes after entry, subsequent ads trigger every 5 minutes thereafter.
-  useEffect(() => {
-    let recurringInterval: any = null;
-    const initialDelayMinutes = config?.interstitialAdInitialDelayMinutes ?? 3;
-    const intervalMinutes = config?.interstitialAdIntervalMinutes ?? 5;
-    const initialDelayMs = initialDelayMinutes * 60 * 1000;
-    const recurringIntervalMs = intervalMinutes * 60 * 1000;
-
-    const initialAdTimer = setTimeout(() => {
-      setIsAdOpen(true);
-
-      // Subsequent 5-minute recurring interval
-      recurringInterval = setInterval(() => {
-        setIsAdOpen(true);
-      }, recurringIntervalMs);
-    }, initialDelayMs);
-
-    return () => {
-      clearTimeout(initialAdTimer);
-      if (recurringInterval) clearInterval(recurringInterval);
-    };
-  }, [config?.interstitialAdInitialDelayMinutes, config?.interstitialAdIntervalMinutes]);
-
-  // 1. Dynamic Bot Open / Startup Ad according to Admin Panel settings
+  // 1. Dynamic Startup Ad strictly following Admin Panel configurations (Adsgram & Monetag)
   useEffect(() => {
     if (!user) return;
     const userId = String(user.telegramId || user.id || '').trim();
     if (!userId) return;
 
     const activeProvider = (config?.adProvider || 'adsgram').toLowerCase();
+    // Dynamically retrieve configured delay from Admin Panel without hardcoded fallbacks
     const delayMinutes = activeProvider === 'adsgram'
-      ? (config?.adsgramInitialDelayMinutes ?? config?.interstitialAdInitialDelayMinutes ?? 3)
-      : (config?.monetagInitialDelayMinutes ?? config?.interstitialAdInitialDelayMinutes ?? 3);
+      ? (config?.adsgramInitialDelayMinutes ?? config?.interstitialAdInitialDelayMinutes ?? 0)
+      : (config?.monetagInitialDelayMinutes ?? config?.interstitialAdInitialDelayMinutes ?? 0);
+
     const startupDailyLimit = activeProvider === 'adsgram'
       ? (config?.adsgramStartupDailyLimit ?? 1)
       : (config?.monetagStartupDailyLimit ?? 1);
@@ -366,7 +342,7 @@ export function App() {
       return;
     }
 
-    const delayMs = Math.max(1000, delayMinutes * 60 * 1000);
+    const delayMs = Math.max(1000, Number(delayMinutes) * 60 * 1000);
     const timer = setTimeout(() => {
       console.log(`[Ad System] Triggering startup ad after ${delayMinutes}m delay...`);
       adsProvider.showRewardedAd(
@@ -377,7 +353,7 @@ export function App() {
           console.log('[Ad System] Startup ad completed and recorded.');
         },
         (err) => {
-          console.log('[Ad System] Startup ad dismissed or skipped:', err);
+          console.log('[Ad System] Startup ad dismissed or skipped smoothly:', err);
         }
       ).catch(() => {});
     }, delayMs);
@@ -658,8 +634,10 @@ export function App() {
         {activeTab === 'leaderboard' && (
           <TabLeaderboard
             leaderboard={globalLeaderboard}
+            weeklyLeaderboard={weeklyLeaderboard}
             config={config}
             currentUsername={user.username || 'unknown'}
+            currentTelegramId={user.telegramId}
           />
         )}
 
@@ -710,17 +688,6 @@ export function App() {
           user={user}
         />
       )}
-
-      {/* 3-Minute / 5-Minute Interstitial Ad Modal */}
-      <InterstitialAd
-        isOpen={isAdOpen}
-        onClose={() => setIsAdOpen(false)}
-        provider={config?.adProvider || 'adsgram'}
-        secret={config?.adProviderSecret || '12345'}
-        onCompleted={() => {
-          console.log('Ad completed, user unlocked rewards');
-        }}
-      />
     </div>
   );
 }

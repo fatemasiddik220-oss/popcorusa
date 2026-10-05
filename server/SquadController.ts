@@ -3,21 +3,94 @@ import { db, isMockOrDummyUser } from './db.js';
 import { getMyReferralsFromMongo, getMongoWeeklyReferralLeaderboard, getWeeklyCycleBounds } from './mongoRepo.js';
 import { getActiveAdminReferralSettings } from './referralReward.js';
 
+export function calculateLeaderboardWindow(filter?: string, customStart?: string, customEnd?: string): {
+  startTime: Date;
+  endTime: Date;
+  label: string;
+  filter: string;
+} {
+  const normalizedFilter = String(filter || 'weekly').toLowerCase().trim();
+  const now = new Date();
+
+  if (normalizedFilter === '7d' || normalizedFilter === '7days') {
+    const startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const endTime = now;
+    return {
+      startTime,
+      endTime,
+      label: 'Last 7 Days',
+      filter: '7d',
+    };
+  }
+
+  if (normalizedFilter === '30d' || normalizedFilter === '1m' || normalizedFilter === '30days' || normalizedFilter === '1month') {
+    const startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const endTime = now;
+    return {
+      startTime,
+      endTime,
+      label: 'Last 30 Days (1 Month)',
+      filter: '30d',
+    };
+  }
+
+  if (normalizedFilter === 'custom' && customStart) {
+    const sDate = new Date(customStart);
+    const eDate = customEnd ? new Date(customEnd) : now;
+    eDate.setUTCHours(23, 59, 59, 999);
+    return {
+      startTime: isNaN(sDate.getTime()) ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) : sDate,
+      endTime: isNaN(eDate.getTime()) ? now : eDate,
+      label: 'Custom Range',
+      filter: 'custom',
+    };
+  }
+
+  // Default: Saturday-to-Saturday Contest Window
+  const { startOfCycle, endOfCycle } = getWeeklyCycleBounds();
+  return {
+    startTime: startOfCycle,
+    endTime: endOfCycle,
+    label: 'Saturday to Saturday Contest',
+    filter: 'weekly',
+  };
+}
+
 export const SquadController = {
   /**
    * Resolves the real-time weekly top referral list from MongoDB and reconciles with active in-memory state.
-   * Strictly adheres to Saturday-to-Saturday cycle, qualified referrals only, and real-time accuracy.
+   * Strictly adheres to Saturday-to-Saturday cycle (or user filtered date range), qualified referrals only, and real-time accuracy.
    */
-  resolveWeeklyLeaderboard: async (currentTelegramId?: string, currentUser?: any) => {
+  resolveWeeklyLeaderboard: async (
+    currentTelegramId?: string,
+    currentUser?: any,
+    options?: { filter?: string; startDate?: string; endDate?: string }
+  ) => {
     const config = db.getConfig();
     const minThreshold = config.weeklyContestMinThreshold || 40;
     const prizes = config.weeklyPrizesUsdt || { first: 50, second: 30, third: 20 };
 
-    // 1. Fetch from MongoDB Atlas using the aggregation pipeline
-    const mongoLeaderboard = await getMongoWeeklyReferralLeaderboard(currentTelegramId, minThreshold, prizes);
+    const { startTime, endTime } = calculateLeaderboardWindow(
+      options?.filter,
+      options?.startDate,
+      options?.endDate
+    );
 
-    // 2. Fetch from in-memory engine (Saturday-to-Saturday cycle)
-    const memLeaderboard = db.getWeeklyReferralLeaderboard();
+    // 1. Fetch from MongoDB Atlas using the aggregation pipeline with active window
+    const mongoLeaderboard = await getMongoWeeklyReferralLeaderboard(
+      currentTelegramId,
+      minThreshold,
+      prizes,
+      startTime,
+      endTime
+    );
+
+    // 2. Fetch from in-memory engine using active date window
+    const memLeaderboard = db.getWeeklyReferralLeaderboard(
+      currentUser?.id || currentTelegramId,
+      startTime,
+      endTime
+    );
 
     // 3. Reconcile both lists into a single canonical global map (strictly deduplicated by telegramId)
     const combinedMap = new Map<string, any>();
@@ -120,14 +193,21 @@ export const SquadController = {
       const telegramId = headerTgId || queryTgId;
       const user = telegramId ? db.getUser(telegramId) : undefined;
 
-      const leaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user);
-      const { startOfCycle, endOfCycle } = getWeeklyCycleBounds();
+      const filter = (req.query.timeRange as string) || (req.query.dateFilter as string) || (req.query.filter as string) || 'weekly';
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+
+      const windowInfo = calculateLeaderboardWindow(filter, startDate, endDate);
+      const leaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user, { filter, startDate, endDate });
 
       res.json({
         success: true,
+        filter: windowInfo.filter,
         cycle: {
-          start: startOfCycle.toISOString(),
-          end: endOfCycle.toISOString(),
+          start: windowInfo.startTime.toISOString(),
+          end: windowInfo.endTime.toISOString(),
+          label: windowInfo.label,
+          filter: windowInfo.filter,
         },
         leaderboard,
       });
@@ -391,8 +471,13 @@ export const SquadController = {
         else if (isQual) status = 'QUALIFIED';
         else status = 'PENDING';
 
+        const joinedAt = r.joinedAt || r.created_at || (r as any).joined_at || new Date().toISOString();
+        const created_at = r.created_at || r.joinedAt || (r as any).created_at || new Date().toISOString();
+
         return {
           ...r,
+          joinedAt,
+          created_at,
           status,
           isQualified: isQual,
           isMultiAccount: isUnqual,
@@ -448,7 +533,21 @@ export const SquadController = {
         filteredReferrals = formattedReferrals.filter(r => r.status === 'UNQUALIFIED');
       }
 
-      const weeklyLeaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user);
+      // Contest time window filtering:
+      const contestFilter = String(
+        req.query.timeRange ||
+        req.query.dateFilter ||
+        (['weekly', '7d', '30d', 'custom'].includes(String(req.query.filter || '').toLowerCase()) ? req.query.filter : 'weekly')
+      ).toLowerCase().trim();
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      const windowInfo = calculateLeaderboardWindow(contestFilter, startDate, endDate);
+
+      const weeklyLeaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user, {
+        filter: contestFilter,
+        startDate,
+        endDate,
+      });
 
       res.json({
         success: true,
@@ -465,6 +564,12 @@ export const SquadController = {
         referrals: filteredReferrals,
         my_referral_list: filteredReferrals,
         weeklyLeaderboard,
+        cycle: {
+          start: windowInfo.startTime.toISOString(),
+          end: windowInfo.endTime.toISOString(),
+          label: windowInfo.label,
+          filter: windowInfo.filter,
+        },
         contestConfig: {
           minThreshold: config.weeklyContestMinThreshold,
           prizes: config.weeklyPrizesUsdt,

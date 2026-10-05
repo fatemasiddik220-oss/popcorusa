@@ -252,25 +252,42 @@ class AdsProviderService {
    * Show native ad if SDK is available, or return fallback trigger
    */
   public async showNativeAd(): Promise<boolean> {
-    if (!this.isTelegramEnvironment()) {
-      return false;
-    }
-    // Daily Frequency Cap check (Maximum 3 to 5 ads per day)
+    // Daily Frequency Cap check
     if (!this.canShowAdToday()) {
-      console.log(`[Adsgram] Daily frequency cap reached (${this.getDailyAdCount()}/${this.dailyCap}). Skipping native ad.`);
+      console.log(`[AdsProvider] Daily frequency cap reached (${this.getDailyAdCount()}/${this.dailyCap}). Skipping native ad.`);
       return false;
     }
 
-    if (this.currentProvider === 'adsgram' && this.adsgramController) {
-      try {
-        const res = await this.adsgramController.show();
-        if (res?.done) {
-          this.incrementDailyAdCount();
-          return true;
+    if (this.currentProvider === 'adsgram') {
+      if (!this.isTelegramEnvironment()) return false;
+      if (this.adsgramController) {
+        try {
+          const res = await this.adsgramController.show();
+          if (res?.done) {
+            this.incrementDailyAdCount();
+            return true;
+          }
+          return false;
+        } catch (err) {
+          console.warn('[AdsProvider] Native Adsgram show rejected:', err);
+          return false;
         }
-        return false;
+      }
+    } else if (this.currentProvider === 'monetag') {
+      try {
+        if (typeof window !== 'undefined') {
+          if (typeof window.show_native_ad === 'function') {
+            await window.show_native_ad();
+            this.incrementDailyAdCount();
+            return true;
+          } else if (window.monetag && typeof window.monetag.show === 'function') {
+            await window.monetag.show();
+            this.incrementDailyAdCount();
+            return true;
+          }
+        }
       } catch (err) {
-        console.warn('[AdsProvider] Native Adsgram show rejected:', err);
+        console.warn('[AdsProvider] Native Monetag show error:', err);
         return false;
       }
     }
@@ -278,59 +295,81 @@ class AdsProviderService {
   }
 
   /**
-   * Show Adsgram Rewarded Video Ad.
-   * Uses Adsgram SDK's native onReward completion (res.done) to verify video completion automatically (no fixed timer).
-   * Enforces a strict daily frequency cap of 3 to 5 ads per day across bot sessions and actions.
+   * Show dynamic Rewarded Video Ad (Adsgram or Monetag).
+   * Strictly adheres to Admin Panel delay times and frequency limits.
+   * If ad is unavailable or fails, it bypasses smoothly and executes onReward without blocking the user.
    */
   public async showRewardedAd(
     onReward: () => void | Promise<void>,
     onError?: (err: any) => void
   ): Promise<boolean> {
-    // 1. Daily Frequency Cap check (3 to 5 ads per day)
+    // 1. Daily Frequency Cap check
     // If the user has already reached the daily limit, smoothly bypass the ad and grant action/reward directly
     if (!this.canShowAdToday()) {
       const currentViews = this.getDailyAdCount();
-      console.log(`[Adsgram] Daily frequency cap reached (${currentViews}/${this.dailyCap} ads today). Bypassing ad display and proceeding with action/reward.`);
+      console.log(`[AdsProvider] Daily frequency cap reached (${currentViews}/${this.dailyCap} ads today). Bypassing ad display and proceeding directly.`);
       await onReward();
       return true;
     }
 
-    // 2. If running outside Telegram, Adsgram cannot retrieve launch parameters
-    if (!this.isTelegramEnvironment()) {
-      console.log('[Adsgram] Web preview/standalone mode detected. Adsgram requires Telegram environment. Triggering reward directly.');
-      await onReward();
-      return true;
-    }
-
-    // 3. Official Adsgram Rewarded Video Ad flow
-    if (typeof window !== 'undefined' && window.Adsgram) {
-      if (!this.adsgramController) {
-        this.initAdsgram();
+    // 2. Active Provider: Adsgram
+    if (this.currentProvider === 'adsgram') {
+      if (!this.isTelegramEnvironment()) {
+        console.log('[Adsgram] Web preview/standalone mode detected. Smoothly bypassing ad.');
+        await onReward();
+        return true;
       }
-      if (this.adsgramController) {
+
+      if (typeof window !== 'undefined' && window.Adsgram) {
+        if (!this.adsgramController) {
+          this.initAdsgram();
+        }
+        if (this.adsgramController) {
+          try {
+            const res = await this.adsgramController.show();
+            if (res?.done) {
+              console.log('[Adsgram] Rewarded video completed! Incrementing daily view count.');
+              this.incrementDailyAdCount();
+              await onReward();
+              return true;
+            } else {
+              console.warn('[Adsgram] Rewarded video closed before completion. Bypassing smoothly.');
+              if (onError) onError(new Error('Ad not completed'));
+              await onReward();
+              return false;
+            }
+          } catch (err) {
+            console.warn('[Adsgram] Native rewarded ad failed or dismissed:', err);
+            if (onError) onError(err);
+            // Smoothly bypass without blocking user
+            await onReward();
+            return false;
+          }
+        }
+      }
+    } else if (this.currentProvider === 'monetag') {
+      // 3. Active Provider: Monetag
+      if (typeof window !== 'undefined') {
         try {
-          const res = await this.adsgramController.show();
-          if (res?.done) {
-            console.log('[Adsgram] Rewarded video completed! Incrementing daily view count and executing onReward callback.');
+          if (typeof window.show_native_ad === 'function') {
+            await window.show_native_ad();
             this.incrementDailyAdCount();
             await onReward();
             return true;
-          } else {
-            console.warn('[Adsgram] Rewarded video closed before completion.');
-            if (onError) onError(new Error('Ad not completed'));
-            return false;
+          } else if (window.monetag && typeof window.monetag.show === 'function') {
+            await window.monetag.show();
+            this.incrementDailyAdCount();
+            await onReward();
+            return true;
           }
         } catch (err) {
-          console.warn('[Adsgram] Native rewarded ad failed or dismissed:', err);
-          // Fallback if ad failed to load so user is not blocked
+          console.warn('[Monetag] Native ad failed to trigger:', err);
           if (onError) onError(err);
-          await onReward();
-          return false;
         }
       }
     }
 
-    // Fallback when Adsgram is unavailable or running outside Telegram
+    // Smooth bypass when ad is unavailable or fails to load - never block the user
     await onReward();
     return true;
   }

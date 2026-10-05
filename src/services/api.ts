@@ -391,7 +391,12 @@ class ApiService {
   }
 
   // Get Squad & Weekly Contest (/api/squad/my-referrals)
-  public async getSquadData(): Promise<{
+  public async getSquadData(params?: {
+    status?: string;
+    filter?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{
     referrals: ReferralUserItem[];
     my_referral_list?: ReferralUserItem[];
     counts?: {
@@ -412,6 +417,12 @@ class ApiService {
     unqualified_same_ip?: number;
     referral_bonus?: number;
     weeklyLeaderboard: WeeklyPodiumUser[];
+    cycle?: {
+      start: string;
+      end: string;
+      label?: string;
+      filter?: string;
+    };
     contestConfig: {
       minThreshold: number;
       prizes: { first: number; second: number; third: number };
@@ -420,12 +431,25 @@ class ApiService {
       claimedCommission: number;
     };
   }> {
-    return this.getMyReferrals();
+    const query = new URLSearchParams();
+    if (params?.status) query.set('status', params.status);
+    if (params?.filter) query.set('filter', params.filter);
+    if (params?.startDate) query.set('startDate', params.startDate);
+    if (params?.endDate) query.set('endDate', params.endDate);
+
+    const qs = query.toString();
+    const url = qs ? `/api/squad/my-referrals?${qs}` : '/api/squad/my-referrals';
+    const res = await fetch(url, {
+      headers: this.getHeaders()
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to fetch squad referrals');
+    return data;
   }
 
   // Explicit Squad Stats endpoint
-  public async getSquadStats() {
-    return this.getMyReferrals();
+  public async getSquadStats(params?: { filter?: string; startDate?: string; endDate?: string }) {
+    return this.getSquadData(params);
   }
 
   // Claim Squad Commission
@@ -449,9 +473,24 @@ class ApiService {
     return data.leaderboard;
   }
 
-  // Get Weekly Top Referral List (Saturday-to-Saturday cycle)
-  public async getWeeklyLeaderboard(): Promise<{ cycle: { start: string; end: string }; leaderboard: WeeklyPodiumUser[] }> {
-    const res = await fetch('/api/leaderboard/weekly', {
+  // Get Weekly Top Referral List (Saturday-to-Saturday cycle by default, with dynamic filter options)
+  public async getWeeklyLeaderboard(params?: {
+    filter?: string;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<{
+    cycle: { start: string; end: string; filter?: string; label?: string };
+    leaderboard: WeeklyPodiumUser[];
+    filter?: string;
+  }> {
+    const query = new URLSearchParams();
+    if (params?.filter) query.set('filter', params.filter);
+    if (params?.startDate) query.set('startDate', params.startDate);
+    if (params?.endDate) query.set('endDate', params.endDate);
+
+    const qs = query.toString();
+    const url = qs ? `/api/leaderboard/weekly?${qs}` : '/api/leaderboard/weekly';
+    const res = await fetch(url, {
       headers: this.getHeaders()
     });
     const data = await res.json();

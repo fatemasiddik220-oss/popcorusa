@@ -18,11 +18,29 @@ import {
   Send,
   Play,
   X,
-  Lock
+  Lock,
+  Calendar,
+  Filter
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { User, AdminConfig, ReferralUserItem, WeeklyPodiumUser, SquadCounts } from '../types.js';
+import { User, AdminConfig, ReferralUserItem, WeeklyPodiumUser, SquadCounts, LeaderboardCycleInfo } from '../types.js';
 import { haptic } from '../services/haptic.js';
+import { api } from '../services/api.js';
+
+export function formatReferralTimestamp(dateStr?: string | Date): string {
+  if (!dateStr) return 'Recently';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return 'Recently';
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+}
 
 interface TabSquadProps {
   user: User;
@@ -53,6 +71,54 @@ export const TabSquad: React.FC<TabSquadProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [claimSuccess, setClaimSuccess] = useState<string | null>(null);
+
+  // Dynamic Weekly Contest Filtering
+  const [activeLeaderboard, setActiveLeaderboard] = useState<WeeklyPodiumUser[]>(weeklyLeaderboard);
+  const [activeContestFilter, setActiveContestFilter] = useState<'weekly' | '7d' | '30d' | 'custom'>('weekly');
+  const [activeCycleInfo, setActiveCycleInfo] = useState<LeaderboardCycleInfo | null>(null);
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
+
+  useEffect(() => {
+    setActiveLeaderboard(weeklyLeaderboard);
+  }, [weeklyLeaderboard]);
+
+  const handleContestFilterChange = async (filter: 'weekly' | '7d' | '30d' | 'custom') => {
+    haptic.selection();
+    setActiveContestFilter(filter);
+    if (filter !== 'custom') {
+      try {
+        setIsLeaderboardLoading(true);
+        const res = await api.getWeeklyLeaderboard({ filter });
+        setActiveLeaderboard(res.leaderboard);
+        if (res.cycle) setActiveCycleInfo(res.cycle);
+      } catch (e) {
+        console.warn('Failed to filter contest leaderboard:', e);
+      } finally {
+        setIsLeaderboardLoading(false);
+      }
+    }
+  };
+
+  const handleApplyCustomDate = async () => {
+    if (!customStart) return;
+    haptic.impact('light');
+    try {
+      setIsLeaderboardLoading(true);
+      const res = await api.getWeeklyLeaderboard({
+        filter: 'custom',
+        startDate: customStart,
+        endDate: customEnd || customStart
+      });
+      setActiveLeaderboard(res.leaderboard);
+      if (res.cycle) setActiveCycleInfo(res.cycle);
+    } catch (e) {
+      console.warn('Failed to apply custom contest dates:', e);
+    } finally {
+      setIsLeaderboardLoading(false);
+    }
+  };
 
   // User's unique 8-character referral code
   const refCode = (user.referralCode && user.referralCode.trim().length === 8)
@@ -242,10 +308,10 @@ export const TabSquad: React.FC<TabSquadProps> = ({
   };
 
   // Top 3 Podium Sort (Podium order: 2nd on Left, 1st in Center, 3rd on Right)
-  const rank1 = weeklyLeaderboard.find(u => u.rank === 1);
-  const rank2 = weeklyLeaderboard.find(u => u.rank === 2);
-  const rank3 = weeklyLeaderboard.find(u => u.rank === 3);
-  const ranksRest = weeklyLeaderboard.filter(u => u.rank > 3);
+  const rank1 = activeLeaderboard.find(u => u.rank === 1);
+  const rank2 = activeLeaderboard.find(u => u.rank === 2);
+  const rank3 = activeLeaderboard.find(u => u.rank === 3);
+  const ranksRest = activeLeaderboard.filter(u => u.rank > 3);
 
   const qualifiedReferralsCount = referrals.filter(r => r.isQualified || r.status === 'QUALIFIED' || r.status === 'Qualified').length;
 
@@ -701,6 +767,98 @@ export const TabSquad: React.FC<TabSquadProps> = ({
       {listToggle === 'top' && (
         <div className="space-y-3">
           
+          {/* Dynamic Contest Window Filtering Bar */}
+          <div className="bg-[#121824] p-2.5 rounded-2xl border border-[#252D3D] space-y-2">
+            <div className="flex items-center justify-between text-xs px-1">
+              <span className="text-[11px] font-bold text-gray-300 flex items-center gap-1.5">
+                <Filter className="w-3.5 h-3.5 text-[#FFE600]" />
+                <span>Leaderboard Window:</span>
+              </span>
+              <span className="text-[10px] font-mono-digits text-cyan-400 font-bold">
+                {activeCycleInfo?.label || (activeContestFilter === 'weekly' ? 'Saturday to Saturday Contest' : activeContestFilter.toUpperCase())}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-4 gap-1 text-[11px]">
+              <button
+                type="button"
+                onClick={() => handleContestFilterChange('weekly')}
+                className={`py-1.5 px-1 rounded-xl font-bold transition-all text-center text-[10px] sm:text-xs ${
+                  activeContestFilter === 'weekly'
+                    ? 'bg-[#FFE600] text-black shadow-md font-display'
+                    : 'bg-[#0B0E14] text-gray-400 hover:text-white border border-[#252D3D]'
+                }`}
+              >
+                🌟 Sat-Sat
+              </button>
+              <button
+                type="button"
+                onClick={() => handleContestFilterChange('7d')}
+                className={`py-1.5 px-1 rounded-xl font-bold transition-all text-center text-[10px] sm:text-xs ${
+                  activeContestFilter === '7d'
+                    ? 'bg-[#00E5FF] text-black shadow-md font-display'
+                    : 'bg-[#0B0E14] text-gray-400 hover:text-white border border-[#252D3D]'
+                }`}
+              >
+                ⏱️ 7 Days
+              </button>
+              <button
+                type="button"
+                onClick={() => handleContestFilterChange('30d')}
+                className={`py-1.5 px-1 rounded-xl font-bold transition-all text-center text-[10px] sm:text-xs ${
+                  activeContestFilter === '30d'
+                    ? 'bg-[#00E5FF] text-black shadow-md font-display'
+                    : 'bg-[#0B0E14] text-gray-400 hover:text-white border border-[#252D3D]'
+                }`}
+              >
+                📅 1 Month
+              </button>
+              <button
+                type="button"
+                onClick={() => handleContestFilterChange('custom')}
+                className={`py-1.5 px-1 rounded-xl font-bold transition-all text-center text-[10px] sm:text-xs ${
+                  activeContestFilter === 'custom'
+                    ? 'bg-[#00E5FF] text-black shadow-md font-display'
+                    : 'bg-[#0B0E14] text-gray-400 hover:text-white border border-[#252D3D]'
+                }`}
+              >
+                🗓️ Custom
+              </button>
+            </div>
+
+            {/* Custom Range Picker */}
+            {activeContestFilter === 'custom' && (
+              <div className="pt-2 border-t border-[#252D3D] flex items-center gap-1.5 text-xs flex-wrap">
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="bg-[#0B0E14] border border-[#252D3D] rounded-lg px-2 py-1 text-white text-[10px] flex-1 min-w-[100px]"
+                />
+                <span className="text-gray-400 text-xs">to</span>
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="bg-[#0B0E14] border border-[#252D3D] rounded-lg px-2 py-1 text-white text-[10px] flex-1 min-w-[100px]"
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyCustomDate}
+                  className="px-2.5 py-1 bg-cyan-400 hover:bg-cyan-300 text-black font-bold rounded-lg text-[10px]"
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+
+            {isLeaderboardLoading && (
+              <div className="text-[10px] text-gray-400 text-center animate-pulse">
+                Filtering referrals strictly within window...
+              </div>
+            )}
+          </div>
+
           {/* Top 3 Podium Cards: 2nd (Left Silver), 1st (Center Golden Crown 👑), 3rd (Right Bronze) */}
           <div className="grid grid-cols-3 gap-2 items-end pt-3">
             
@@ -965,6 +1123,12 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                                 <span>UNQUALIFIED</span>
                               </span>
                             )}
+                          </div>
+
+                          {/* Exact Joined Date & Timestamp Display */}
+                          <div className="flex items-center gap-1.5 text-[10px] text-gray-400 mt-1 font-mono-digits">
+                            <Calendar className="w-3 h-3 text-[#00E5FF] shrink-0" />
+                            <span>Joined: <strong className="text-gray-200">{formatReferralTimestamp(ref.joinedAt || ref.created_at)}</strong></span>
                           </div>
                         </div>
 

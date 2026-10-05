@@ -883,7 +883,9 @@ export async function autoReconcileReferralsInMongo(): Promise<void> {
 export async function getMongoWeeklyReferralLeaderboard(
   currentTelegramId?: string,
   minThreshold: number = 40,
-  prizes: { first: number; second: number; third: number } = { first: 50, second: 30, third: 20 }
+  prizes: { first: number; second: number; third: number } = { first: 50, second: 30, third: 20 },
+  filterStart?: Date,
+  filterEnd?: Date
 ): Promise<any[] | null> {
   if (!isMongoConnected()) return null;
 
@@ -891,10 +893,12 @@ export async function getMongoWeeklyReferralLeaderboard(
     // 1. Auto-reconcile any verified referrals from UserModel to guarantee zero lag
     await autoReconcileReferralsInMongo();
 
-    const { startOfCycle, endOfCycle } = getWeeklyCycleBounds();
+    const bounds = getWeeklyCycleBounds();
+    const cycleStart = filterStart || bounds.startOfCycle;
+    const cycleEnd = filterEnd || bounds.endOfCycle;
 
     const pipeline: any[] = [
-      // 1. Match ONLY referrals marked as QUALIFIED within current Saturday-to-Saturday weekly cycle
+      // 1. Match ONLY referrals marked as QUALIFIED within current cycle / filter window
       {
         $match: {
           $or: [
@@ -908,13 +912,13 @@ export async function getMongoWeeklyReferralLeaderboard(
               {
                 $gte: [
                   { $ifNull: ['$qualified_at', { $ifNull: ['$updated_at', '$created_at'] }] },
-                  startOfCycle,
+                  cycleStart,
                 ],
               },
               {
                 $lt: [
                   { $ifNull: ['$qualified_at', { $ifNull: ['$updated_at', '$created_at'] }] },
-                  endOfCycle,
+                  cycleEnd,
                 ],
               },
             ],

@@ -111,6 +111,14 @@ export interface ReferralUserItem {
   bonusAwardedPOP: number;
   referralBonusClaimed?: boolean;
   qualifiedAt?: string;
+  joinedDateFormatted?: string;
+}
+
+export interface LeaderboardCycleInfo {
+  start: string;
+  end: string;
+  filter?: string;
+  label?: string;
 }
 
 export interface WeeklyPodiumUser {

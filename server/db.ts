@@ -168,8 +168,17 @@ export const defaultAdminConfig: AdminConfig = {
   tasks: defaultEcosystemTasks,
   adProvider: (process.env.AD_PROVIDER as any) || 'adsgram',
   adProviderSecret: process.env.AD_PROVIDER_SECRET || '50936',
+  adsDailyCap: 4,
   interstitialAdIntervalMinutes: 5,
-  interstitialAdInitialDelayMinutes: 3,
+  interstitialAdInitialDelayMinutes: 0,
+  adsgramBlockId: process.env.AD_PROVIDER_SECRET || '50936',
+  adsgramInitialDelayMinutes: 0,
+  adsgramStartupDailyLimit: 1,
+  adsgramClaimDailyLimit: 1,
+  monetagZoneId: '7894561',
+  monetagInitialDelayMinutes: 0,
+  monetagStartupDailyLimit: 1,
+  monetagClaimDailyLimit: 1,
 };
 
 export function generateAlphanumericReferralCode(): string {
@@ -1931,7 +1940,8 @@ class DatabaseEngine {
         firstName: u ? (u.firstName || u.username) : (ref.firstName || ref.username || 'POP Miner'),
         first_name: u ? (u.firstName || u.username) : (ref.firstName || ref.username || 'POP Miner'),
         telegram_id: String(ref.telegramId),
-        created_at: ref.joinedAt || (u ? u.createdAt : new Date().toISOString()),
+        created_at: ref.created_at || ref.joinedAt || (u ? u.createdAt : new Date().toISOString()),
+        joinedAt: ref.joinedAt || ref.created_at || (u ? u.createdAt : new Date().toISOString()),
         hasWallet,
         hasChannel,
         hasMined,
@@ -1991,10 +2001,12 @@ class DatabaseEngine {
   }
 
   // Get Weekly Referral Contest Leaderboard (Saturday-to-Saturday Cycle, strictly deduplicated by Telegram ID)
-  public getWeeklyReferralLeaderboard(currentUserId?: string): WeeklyPodiumUser[] {
+  public getWeeklyReferralLeaderboard(currentUserId?: string, filterStart?: Date, filterEnd?: Date): WeeklyPodiumUser[] {
     const list: WeeklyPodiumUser[] = [];
     const seenInviters = new Set<string>();
-    const { startOfCycle, endOfCycle } = getWeeklyCycleBounds();
+    const defaultBounds = getWeeklyCycleBounds();
+    const startTime = filterStart || defaultBounds.startOfCycle;
+    const endTime = filterEnd || defaultBounds.endOfCycle;
 
     // Calculate referral counts across all users
     this.referrals.forEach((referredList, inviterId) => {
@@ -2005,15 +2017,14 @@ class DatabaseEngine {
       if (!tid || seenInviters.has(tid)) return;
       seenInviters.add(tid);
 
-      // Filter out dummy referrals and only count referrals made in current Saturday-to-Saturday weekly cycle
+      // Filter out dummy referrals and only count referrals made in current weekly cycle/filter window
       const cycleReferredList = referredList.filter(r => {
         if (isMockOrDummyUser(r)) return false;
         const dateStr = (r as any).qualifiedAt || (r as any).created_at || (r as any).joinedAt;
-        if (dateStr) {
-          const t = new Date(dateStr).getTime();
-          if (!isNaN(t) && (t < startOfCycle.getTime() || t >= endOfCycle.getTime())) {
-            return false;
-          }
+        if (!dateStr) return false;
+        const t = new Date(dateStr).getTime();
+        if (isNaN(t) || t < startTime.getTime() || t >= endTime.getTime()) {
+          return false;
         }
         return true;
       });
