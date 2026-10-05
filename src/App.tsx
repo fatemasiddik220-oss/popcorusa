@@ -182,6 +182,21 @@ export function App() {
       setReferrals(squadData.my_referral_list || squadData.referrals || []);
       setWeeklyLeaderboard(squadData.weeklyLeaderboard || []);
       if (squadData.counts) setSquadCounts(squadData.counts);
+      if (squadData.contestConfig) {
+        setUser(prev => {
+          if (!prev) return prev;
+          const freshUnclaimed = Number(squadData.contestConfig.unclaimedCommission ?? prev.unclaimedSquadPOP ?? 0);
+          const freshClaimed = Number(squadData.contestConfig.claimedCommission ?? prev.claimedSquadPOP ?? 0);
+          if (freshUnclaimed !== prev.unclaimedSquadPOP || freshClaimed !== prev.claimedSquadPOP) {
+            return {
+              ...prev,
+              unclaimedSquadPOP: freshUnclaimed,
+              claimedSquadPOP: freshClaimed,
+            };
+          }
+          return prev;
+        });
+      }
     } catch (e) {
       console.warn('Failed to refresh squad:', e);
     }

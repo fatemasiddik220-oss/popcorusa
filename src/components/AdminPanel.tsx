@@ -42,7 +42,9 @@ import {
   Activity,
   Percent,
   ShieldCheck,
-  Database
+  Database,
+  Coins,
+  Sparkles
 } from 'lucide-react';
 import {
   AdminConfig,
@@ -51,7 +53,9 @@ import {
   EcosystemTask,
   AdminAnalytics,
   AdminUserListItem,
-  AdminStatsResponse
+  AdminStatsResponse,
+  TokenSupplyStats,
+  WeeklyPodiumUser
 } from '../types.js';
 import { api } from '../services/api.js';
 import { haptic } from '../services/haptic.js';
@@ -81,7 +85,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [authLoading, setAuthLoading] = useState(false);
 
   const [activeAdminTab, setActiveAdminTab] = useState<
-    'dashboard' | 'analytics' | 'users' | 'adNetwork' | 'balance' | 'referrals' | 'mining' | 'storage' | 'tasks' | 'contest' | 'withdrawals' | 'antiCheat' | 'botSupport'
+    'dashboard' | 'analytics' | 'supply' | 'users' | 'adNetwork' | 'balance' | 'referrals' | 'mining' | 'storage' | 'tasks' | 'contest' | 'withdrawals' | 'antiCheat' | 'botSupport'
   >('dashboard');
   
   // Local mutable config state
@@ -90,6 +94,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [usersList, setUsersList] = useState<User[]>([]);
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
   const [statsData, setStatsData] = useState<AdminStatsResponse | null>(null);
+  const [tokenStats, setTokenStats] = useState<TokenSupplyStats | null>(null);
+  const [monetizeSubTab, setMonetizeSubTab] = useState<'adsgram' | 'monetag' | 'dual'>('adsgram');
+  const [weeklyContestLeaderboard, setWeeklyContestLeaderboard] = useState<WeeklyPodiumUser[]>([]);
+  const [isContestLoading, setIsContestLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -218,19 +226,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     try {
       setLoading(true);
       setActionError(null);
-      const [overviewData, statsRes] = await Promise.all([
+      const [overviewData, statsRes, tokenStatsRes] = await Promise.all([
         api.getAdminOverview(),
-        api.getAdminStats().catch(() => null)
+        api.getAdminStats().catch(() => null),
+        api.getTokenStats().catch(() => null)
       ]);
       setWithdrawals(overviewData.withdrawals || []);
       setUsersList(overviewData.users || []);
       if (overviewData.analytics) {
         setAnalytics(overviewData.analytics);
       }
+      if (overviewData.config) {
+        setEditableConfig(JSON.parse(JSON.stringify(overviewData.config)));
+      }
       if (statsRes) {
         setStatsData(statsRes);
       }
+      if (tokenStatsRes) {
+        setTokenStats(tokenStatsRes);
+      } else if (statsRes?.tokenStats) {
+        setTokenStats(statsRes.tokenStats);
+      }
       await fetchUsersList(usersSearchQuery, usersPage);
+      // Fetch Live Weekly Referral Contest Leaderboard
+      fetchWeeklyContestLeaderboard();
       // Fetch MongoDB Atlas Cluster Status
       api.adminGetMongoStatus().then(res => {
         if (res && res.success) setMongoStatus(res);
@@ -243,6 +262,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setActionError(err.message || 'Failed to authenticate admin');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchWeeklyContestLeaderboard = async () => {
+    try {
+      setIsContestLoading(true);
+      const res = await api.getWeeklyLeaderboard();
+      if (res && res.leaderboard) {
+        setWeeklyContestLeaderboard(res.leaderboard);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch contest leaderboard for admin:', e);
+    } finally {
+      setIsContestLoading(false);
     }
   };
 
@@ -727,7 +760,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     return w.status === withdrawalFilter;
   });
 
+  const effectiveMaxSupply = tokenStats?.maxSupply ?? statsData?.maxTotalSupply ?? config.maxTotalSupply ?? 10000000;
+  const effectiveDistributed = tokenStats?.totalDistributed ?? statsData?.totalDistributed ?? config.totalDistributed ?? 
+    (usersList.reduce((acc, u) => acc + (u.balancePOP || 0), 0) + withdrawals.filter(w => w.status !== 'REJECTED').reduce((acc, w) => acc + (w.amountPOP || 0), 0));
+  const effectiveRemaining = tokenStats?.remainingSupply ?? statsData?.remainingSupply ?? Math.max(0, effectiveMaxSupply - effectiveDistributed);
+  const effectivePercent = effectiveMaxSupply > 0 ? Math.min(100, Math.max(0, (effectiveDistributed / effectiveMaxSupply) * 100)) : 0;
+  const effectiveIsCapReached = effectiveRemaining <= 0 || Boolean(tokenStats?.isCapReached ?? statsData?.isCapReached ?? config.isCapReached);
+
   const adminNavItems = [
+    {
+      id: 'supply',
+      title: '10,000,000 POP Supply Cap & Circulation',
+      shortTitle: 'Supply Cap (10M)',
+      description: 'Strict 10M token distribution cap, claimed coins & remaining balance',
+      badge: `${effectiveRemaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} POP Left`,
+      badgeClass: effectiveIsCapReached ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse' : 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+      icon: <Coins className="w-6 h-6 text-amber-400" />,
+      cardGradient: 'from-amber-950/40 via-[#121824] to-[#0E131F] border-amber-500/30 hover:border-amber-400',
+    },
     {
       id: 'analytics',
       title: 'Analytics & KPIs',
@@ -792,9 +842,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     },
     {
       id: 'adNetwork',
-      title: 'Ad Monetization',
-      shortTitle: 'Ad Network',
-      description: 'Switch between Adsgram & Monetag in real time',
+      title: 'Monetize & Ad Networks',
+      shortTitle: 'Monetize',
+      description: 'Dynamic Adsgram & Monitag settings, delay timers & daily frequency control',
       badge: (editableConfig.adProvider || 'adsgram').toUpperCase(),
       badgeClass: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
       icon: <Tv className="w-6 h-6 text-sky-400" />,
@@ -1022,6 +1072,146 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
+              {/* 10,000,000 POP STRICT SUPPLY CAP & CIRCULATION REAL-TIME DASHBOARD CARD */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#121824] via-[#0E131F] to-[#161D2B] border border-amber-500/40 shadow-xl shadow-amber-500/5 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full blur-3xl pointer-events-none" />
+                
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#1E2638] relative z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 shadow-lg shadow-amber-500/10">
+                      <Coins className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-xs font-black text-white uppercase tracking-wider font-display">
+                          POP Token Supply Cap & Circulation
+                        </h4>
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                          effectiveIsCapReached
+                            ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse'
+                            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                        }`}>
+                          {effectiveIsCapReached ? '● 10M CAP REACHED (MINTING LOCKED)' : '● POOL ACTIVE (10M HARD CAP)'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Strict 10,000,000 POP maximum distribution pool across mining, referrals, quests & bonuses.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        haptic.impact('light');
+                        loadAdminData();
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-[#0B0E14] border border-[#252D3D] text-[11px] text-gray-300 hover:text-white flex items-center gap-1.5 font-bold transition-all hover:bg-[#1A2234]"
+                      title="Refresh real-time token statistics"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-amber-400' : 'text-gray-400'}`} />
+                      <span>Refresh</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        haptic.impact('medium');
+                        setActiveAdminTab('supply');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/50 text-amber-300 hover:bg-amber-500/30 text-[11px] font-bold transition-all flex items-center gap-1 shadow-md shadow-amber-500/10"
+                    >
+                      <span>Full Breakdown</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Primary Real-Time Metric Display: Claimed vs Remaining vs Max Cap */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3.5 relative z-10">
+                  {/* Claimed / Circulated POP */}
+                  <div className="p-3.5 rounded-xl bg-[#0B0E14]/80 border border-[#1E2638] flex flex-col justify-between">
+                    <div className="flex items-center justify-between text-gray-400 text-[10px] mb-1">
+                      <span className="font-bold uppercase tracking-wider text-amber-400">Claimed & Circulated</span>
+                      <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-black text-amber-300 font-mono-digits tracking-tight drop-shadow-[0_0_12px_rgba(245,158,11,0.25)]">
+                      {effectiveDistributed.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="flex items-center justify-between mt-1 text-[11px]">
+                      <span className="text-gray-400 font-mono-digits">
+                        ≈ ${((effectiveDistributed) * (config.popUsdRate || 0.001)).toFixed(2)} USD
+                      </span>
+                      <span className="text-amber-400 font-bold font-mono-digits">
+                        {effectivePercent.toFixed(2)}% of cap
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Remaining Unclaimed Supply */}
+                  <div className="p-3.5 rounded-xl bg-[#0B0E14]/80 border border-[#1E2638] flex flex-col justify-between">
+                    <div className="flex items-center justify-between text-gray-400 text-[10px] mb-1">
+                      <span className="font-bold uppercase tracking-wider text-emerald-400">Remaining in Pool</span>
+                      <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-black text-emerald-400 font-mono-digits tracking-tight drop-shadow-[0_0_12px_rgba(16,185,129,0.25)]">
+                      {effectiveRemaining.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="flex items-center justify-between mt-1 text-[11px]">
+                      <span className="text-gray-400 font-mono-digits">
+                        ≈ ${((effectiveRemaining) * (config.popUsdRate || 0.001)).toFixed(2)} USD
+                      </span>
+                      <span className="text-emerald-400 font-bold font-mono-digits">
+                        {(100 - effectivePercent).toFixed(2)}% left
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Max Hard Supply Cap */}
+                  <div className="p-3.5 rounded-xl bg-[#0B0E14]/80 border border-[#1E2638] flex flex-col justify-between">
+                    <div className="flex items-center justify-between text-gray-400 text-[10px] mb-1">
+                      <span className="font-bold uppercase tracking-wider text-blue-400">Total Hard Cap</span>
+                      <Lock className="w-3.5 h-3.5 text-blue-400" />
+                    </div>
+                    <div className="text-xl sm:text-2xl font-black text-white font-mono-digits tracking-tight">
+                      {effectiveMaxSupply.toLocaleString()}
+                    </div>
+                    <div className="flex items-center justify-between mt-1 text-[11px]">
+                      <span className="text-gray-400 font-mono-digits">POP Tokens</span>
+                      <span className="text-blue-400 font-bold font-mono-digits">10M Limit</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Real-time Distribution Progress Bar */}
+                <div className="mt-3.5 pt-3 border-t border-[#1E2638] relative z-10">
+                  <div className="flex items-center justify-between text-[11px] mb-1.5 font-mono">
+                    <span className="text-gray-400 flex items-center gap-1.5">
+                      <span>Distribution Progress:</span>
+                      <strong className="text-amber-400 font-bold">{effectivePercent.toFixed(2)}% Claimed</strong>
+                    </span>
+                    <span className="text-emerald-400 font-bold">
+                      {effectiveRemaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} POP Available
+                    </span>
+                  </div>
+                  <div className="w-full h-3 bg-[#0B0E14] rounded-full overflow-hidden border border-[#252D3D] p-0.5">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${
+                        effectiveIsCapReached
+                          ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-red-500'
+                          : 'bg-gradient-to-r from-amber-500 via-[#FFE600] to-emerald-400'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(0, effectivePercent))}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-gray-500 font-mono mt-1">
+                    <span>0 POP (Genesis)</span>
+                    <span>2.5M (25%)</span>
+                    <span>5.0M (50%)</span>
+                    <span>7.5M (75%)</span>
+                    <span className="text-amber-400 font-bold">10M POP (Hard Cap)</span>
+                  </div>
+                </div>
+              </div>
+
               {/* MongoDB Atlas Database Cluster Health & IP Whitelist Banner */}
               <div className={`p-4 rounded-2xl border transition-all ${
                 mongoStatus?.isConnected
@@ -1208,6 +1398,308 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </button>
                 </div>
               )}
+            </div>
+          )}
+          
+          {/* TAB 0.5: 10,000,000 POP TOTAL SUPPLY CAP & CIRCULATION COMMAND CENTER */}
+          {activeAdminTab === 'supply' && (
+            <div className="space-y-4 animate-in fade-in">
+              {/* Header with Navigation and Refresh */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#121824] p-4 rounded-2xl border border-[#252D3D]">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      haptic.impact('light');
+                      setActiveAdminTab('dashboard');
+                    }}
+                    className="p-2 rounded-xl bg-[#0B0E14] border border-[#252D3D] text-gray-300 hover:text-white transition-all hover:bg-[#1A2234]"
+                    title="Back to Dashboard"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <div>
+                    <h3 className="text-sm font-black text-white uppercase tracking-wider font-display flex items-center gap-2">
+                      <Coins className="w-4 h-4 text-amber-400" />
+                      <span>10,000,000 POP Total Supply Protocol</span>
+                    </h3>
+                    <p className="text-[11px] text-gray-400">
+                      Real-time supply cap audit, circulating tokens & remaining pool reserve
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${
+                    effectiveIsCapReached
+                      ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}>
+                    {effectiveIsCapReached ? '● 10M CAP REACHED (MINTING LOCKED)' : '● POOL ACTIVE (10M HARD CAP)'}
+                  </span>
+                  <button
+                    onClick={() => {
+                      haptic.impact('light');
+                      loadAdminData();
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-[#0B0E14] border border-[#252D3D] text-[11px] text-gray-300 hover:text-white flex items-center gap-1.5 font-bold transition-all hover:bg-[#1A2234]"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-amber-400' : 'text-gray-400'}`} />
+                    <span>Refresh Data</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Main Token Supply Statistics KPI Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Metric 1: Claimed & Circulated Tokens */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/30 via-[#121824] to-[#0E131F] border border-amber-500/40 shadow-lg relative overflow-hidden flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-gray-400 text-xs mb-2">
+                    <span className="font-bold uppercase tracking-wider text-amber-400">Claimed & Circulated</span>
+                    <TrendingUp className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-amber-300 font-mono-digits tracking-tight drop-shadow-[0_0_12px_rgba(245,158,11,0.3)]">
+                    {effectiveDistributed.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-xs text-amber-400/90 font-mono-digits mt-1 flex items-center justify-between">
+                    <span>≈ ${((effectiveDistributed) * (config.popUsdRate || 0.001)).toFixed(2)} USD</span>
+                    <span className="font-bold">{effectivePercent.toFixed(2)}% of Cap</span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 mt-2 block">
+                    All tokens minted across mining, quests, referrals & bonuses
+                  </span>
+                </div>
+
+                {/* Metric 2: Remaining Supply in Pool */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/30 via-[#121824] to-[#0E131F] border border-emerald-500/40 shadow-lg relative overflow-hidden flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-gray-400 text-xs mb-2">
+                    <span className="font-bold uppercase tracking-wider text-emerald-400">Remaining in Pool</span>
+                    <Zap className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-emerald-400 font-mono-digits tracking-tight drop-shadow-[0_0_12px_rgba(16,185,129,0.3)]">
+                    {effectiveRemaining.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-xs text-emerald-400/90 font-mono-digits mt-1 flex items-center justify-between">
+                    <span>≈ ${((effectiveRemaining) * (config.popUsdRate || 0.001)).toFixed(2)} USD</span>
+                    <span className="font-bold">{(100 - effectivePercent).toFixed(2)}% Available</span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 mt-2 block">
+                    Unclaimed tokens remaining before hard supply cutoff
+                  </span>
+                </div>
+
+                {/* Metric 3: Strict Total Supply Cap */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-950/30 via-[#121824] to-[#0E131F] border border-blue-500/40 shadow-lg relative overflow-hidden flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-gray-400 text-xs mb-2">
+                    <span className="font-bold uppercase tracking-wider text-blue-400">Total Hard Cap</span>
+                    <Lock className="w-4 h-4 text-blue-400" />
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-black text-white font-mono-digits tracking-tight">
+                    {effectiveMaxSupply.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-blue-400/90 font-mono-digits mt-1 flex items-center justify-between">
+                    <span>POP Tokens</span>
+                    <span className="font-bold">100.00% Maximum</span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 mt-2 block">
+                    Strict mathematical ceiling: zero inflation permitted
+                  </span>
+                </div>
+              </div>
+
+              {/* Real-Time Progress Bar & Milestones */}
+              <div className="p-5 rounded-2xl bg-[#121824] border border-[#252D3D] space-y-3">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-gray-300 font-bold flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-amber-400" />
+                    <span>10,000,000 POP Distribution Barometer</span>
+                  </span>
+                  <span className="text-amber-400 font-bold">
+                    {effectiveDistributed.toLocaleString(undefined, { maximumFractionDigits: 0 })} / {effectiveMaxSupply.toLocaleString()} POP ({effectivePercent.toFixed(2)}%)
+                  </span>
+                </div>
+
+                <div className="w-full h-4 bg-[#0B0E14] rounded-full overflow-hidden border border-[#1E2638] p-0.5">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${
+                      effectiveIsCapReached
+                        ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-red-500'
+                        : 'bg-gradient-to-r from-amber-500 via-[#FFE600] to-emerald-400'
+                    }`}
+                    style={{ width: `${Math.min(100, Math.max(0, effectivePercent))}%` }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-5 text-center text-[10px] text-gray-500 font-mono pt-1">
+                  <div>
+                    <span className="block text-gray-400 font-bold">0 POP</span>
+                    <span>Genesis</span>
+                  </div>
+                  <div>
+                    <span className="block text-gray-400 font-bold">2.5M POP</span>
+                    <span>25% Pool</span>
+                  </div>
+                  <div>
+                    <span className="block text-gray-400 font-bold">5.0M POP</span>
+                    <span>50% Halving</span>
+                  </div>
+                  <div>
+                    <span className="block text-gray-400 font-bold">7.5M POP</span>
+                    <span>75% Pool</span>
+                  </div>
+                  <div>
+                    <span className="block text-amber-400 font-bold">10M POP</span>
+                    <span>Hard Limit</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Token Breakdown: Balances vs Withdrawn */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-4 rounded-2xl bg-[#121824] border border-[#252D3D] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">
+                      Circulating in User Wallets
+                    </span>
+                    <div className="text-xl font-black text-emerald-400 font-mono-digits mt-1">
+                      {(tokenStats?.totalCirculating ?? statsData?.totalCirculating ?? usersList.reduce((acc, u) => acc + (u.balancePOP || 0), 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })} POP
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono-digits">
+                      Active balances held by registered users in app
+                    </span>
+                  </div>
+                  <Wallet className="w-8 h-8 text-emerald-400/50" />
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[#121824] border border-[#252D3D] flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block">
+                      Claimed & Withdrawn to TON
+                    </span>
+                    <div className="text-xl font-black text-blue-400 font-mono-digits mt-1">
+                      {(tokenStats?.totalWithdrawn ?? withdrawals.filter(w => w.status !== 'REJECTED').reduce((acc, w) => acc + (w.amountPOP || 0), 0)).toLocaleString(undefined, { maximumFractionDigits: 2 })} POP
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono-digits">
+                      Tokens successfully paid out or pending TON transfer
+                    </span>
+                  </div>
+                  <ExternalLink className="w-8 h-8 text-blue-400/50" />
+                </div>
+              </div>
+
+              {/* Distribution Channels: All 5 Sources Contributing to 10M Cap */}
+              <div className="p-5 rounded-2xl bg-[#121824] border border-[#252D3D] space-y-3">
+                <h4 className="text-xs font-black text-white uppercase tracking-wider font-display flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Token Distribution Channels Contributing to 10,000,000 Cap</span>
+                </h4>
+                <p className="text-[11px] text-gray-400">
+                  Every distribution channel strictly draws from the same authoritative 10,000,000 POP supply pool.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                  {/* Channel 1 */}
+                  <div className="p-3 bg-[#0B0E14] rounded-xl border border-[#1E2638] flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 shrink-0">
+                      <Zap className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">1. Mining Engine Claims</h5>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Hourly mining accrual based on 50 rig fleet tiers. Users claim accrued POP after connecting TON wallet and joining official Telegram channel.
+                      </p>
+                      <span className="text-[10px] text-yellow-400 font-mono font-bold mt-1 block">
+                        Lifetime Mined: {(statsData?.totalMined ?? analytics?.totalMinedPOP ?? 0).toLocaleString()} POP
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Channel 2 */}
+                  <div className="p-3 bg-[#0B0E14] rounded-xl border border-[#1E2638] flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 shrink-0">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">2. Squad & Referral Network</h5>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Single dynamic referral bonus upon referee qualification + passive lifetime mining commission (e.g. 10%–15%) on all mining claims.
+                      </p>
+                      <span className="text-[10px] text-indigo-400 font-mono font-bold mt-1 block">
+                        Qualified Invites: {statsData?.totalQualifiedReferrals ?? analytics?.totalQualifiedReferrals ?? 0}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Channel 3 */}
+                  <div className="p-3 bg-[#0B0E14] rounded-xl border border-[#1E2638] flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
+                      <Award className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">3. Ecosystem Tasks & Quests</h5>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Partner channel follows, video views, and sponsored promotional quests with strict verification cooldown timers.
+                      </p>
+                      <span className="text-[10px] text-rose-400 font-mono font-bold mt-1 block">
+                        Active Quests: {editableConfig.tasks?.length || 0} tasks configured
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Channel 4 */}
+                  <div className="p-3 bg-[#0B0E14] rounded-xl border border-[#1E2638] flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-teal-500/15 text-teal-400 border border-teal-500/30 shrink-0">
+                      <Calendar className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">4. Daily Check-in Streaks</h5>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Ascending 7-day streak rewards (+5 to +15 POP). Users must maintain uninterrupted daily logins to claim rewards.
+                      </p>
+                      <span className="text-[10px] text-teal-400 font-mono font-bold mt-1 block">
+                        Cycle Scale: 5, 6, 7, 8, 10, 12, 15 POP
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Channel 5 */}
+                  <div className="p-3 bg-[#0B0E14] rounded-xl border border-[#1E2638] flex items-start gap-3 sm:col-span-2">
+                    <div className="p-2 rounded-lg bg-purple-500/15 text-purple-400 border border-purple-500/30 shrink-0">
+                      <Gift className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-white">5. Admin Manual Credits & Broadcast Bonuses</h5>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        Direct administrative bonus credits and universal community broadcasts. Each operation is strictly checked against the remaining 10,000,000 POP supply reserve.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Protocol Enforcement Notice Card */}
+              <div className={`p-4 rounded-2xl border transition-all ${
+                effectiveIsCapReached
+                  ? 'bg-red-950/20 border-red-500/40 text-red-200'
+                  : 'bg-emerald-950/15 border-emerald-500/30 text-emerald-200'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <div className={`p-2 rounded-xl shrink-0 ${
+                    effectiveIsCapReached ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'
+                  }`}>
+                    {effectiveIsCapReached ? <AlertTriangle className="w-5 h-5 animate-pulse" /> : <ShieldCheck className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-black uppercase tracking-wider text-white">
+                      Strict Hard Cap Protocol Enforcement Rules
+                    </h5>
+                    <p className="text-[11px] text-gray-300 mt-1 leading-relaxed">
+                      • When the circulating supply reaches exactly <strong>10,000,000 POP</strong>, the server automatically rejects any further claims with code <code className="text-amber-300 bg-[#0B0E14] px-1 py-0.5 rounded">TOTAL_SUPPLY_CAP_REACHED</code>.<br />
+                      • If an earned reward exceeds the remaining pool balance, the user is awarded only the remaining balance and the cap is closed.<br />
+                      • Users cannot bypass the limit through client-side manipulation, as all distribution calculations are server-authoritative.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           
@@ -1870,9 +2362,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-[11px] text-gray-300 block mb-1">Custom Commission % (Exact):</label>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
                     max="100"
-                    value={editableConfig.squadCommissionRate ?? editableConfig.referralCommissionPercent ?? 10}
+                    value={editableConfig.squadCommissionRate ?? editableConfig.referralCommissionPercent ?? 0}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       setEditableConfig(prev => ({
@@ -1892,7 +2384,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <label className="text-[11px] text-gray-300 block mb-1">Instant Referral Bonus (POP on qualification):</label>
                   <input
                     type="number"
-                    value={editableConfig.referralBonusAmount ?? editableConfig.referral_bonus ?? editableConfig.instantReferralBonusPOP ?? 100}
+                    min="0"
+                    value={editableConfig.referralBonusAmount ?? editableConfig.referral_bonus ?? editableConfig.instantReferralBonusPOP ?? 0}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value) || 0;
                       setEditableConfig({
@@ -2675,34 +3168,82 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           )}
 
-          {/* TAB 8: WEEKLY CONTEST */}
+          {/* TAB 8: WEEKLY CONTEST & MANUAL PAYOUT DASHBOARD */}
           {activeAdminTab === 'contest' && (
-            <div className="space-y-3">
-              <div>
-                <h3 className="text-xs font-bold text-white uppercase tracking-wider">Weekly Contest Thresholds</h3>
-                <span className="text-[11px] text-gray-400">Manage prize distribution in USDT and minimum invite thresholds</span>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Award className="w-4 h-4 text-[#FFE600]" />
+                    Weekly Referral Contest & Manual Payouts
+                  </h3>
+                  <span className="text-[11px] text-gray-400">
+                    Saturday-to-Saturday cycle rules, prize pool amounts, and manual payout review
+                  </span>
+                </div>
+                <button
+                  onClick={fetchWeeklyContestLeaderboard}
+                  disabled={isContestLoading}
+                  className="px-3 py-1.5 rounded-xl bg-[#1E2638] hover:bg-[#252D3D] text-gray-300 text-xs font-bold flex items-center gap-1.5 transition-all"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isContestLoading ? 'animate-spin text-[#FFE600]' : ''}`} />
+                  <span>Refresh Rankings</span>
+                </button>
               </div>
 
+              {/* 1. 100% MANUAL PAYOUT PROTOCOL ENFORCEMENT BANNER */}
+              <div className="p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black text-emerald-400 uppercase tracking-wide">
+                      100% Manual Payout Protocol Enforced
+                    </span>
+                    <span className="text-[9px] font-bold bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                      Zero Automated Transfers
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-300 leading-relaxed">
+                    The bot does <strong>NOT</strong> automatically send or distribute any bonus tokens or USD rewards to winners. 
+                    Admins manually review the verified rankings on the leaderboard below at the conclusion of each Saturday cycle and execute prize distribution directly.
+                  </p>
+                </div>
+              </div>
+
+              {/* 2. CONTEST RULES & PRIZE POOL CONFIGURATION */}
               <div className="p-4 bg-[#121824] border border-[#252D3D] rounded-2xl space-y-3">
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-[#FFE600]" />
+                  Contest Rules & Prize Pool Settings
+                </h4>
+
                 <div>
-                  <label className="text-[11px] text-gray-300 block font-semibold">Min Invites Qualification Threshold</label>
+                  <label className="text-[11px] text-gray-300 block font-semibold mb-1">
+                    Minimum Qualified Referrals Requirement (Saturday to Saturday)
+                  </label>
                   <input
                     type="number"
+                    min="1"
                     value={editableConfig.weeklyContestMinThreshold}
                     onChange={(e) => setEditableConfig({
                       ...editableConfig,
                       weeklyContestMinThreshold: parseInt(e.target.value, 10) || 40,
                     })}
                     className="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl px-3 py-2 text-white font-mono-digits"
+                    placeholder="e.g. 40"
                   />
+                  <span className="text-[10px] text-gray-500 block mt-1">
+                    Users must achieve at least this many verified qualified referrals within the 7-day cycle to qualify for prizes.
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="text-[10px] text-[#FFE600] font-bold block">1st Prize ($ USDT)</label>
+                    <label className="text-[10px] text-[#FFE600] font-bold block mb-1">👑 1st Prize ($ USDT)</label>
                     <input
                       type="number"
                       step="0.1"
+                      min="0"
                       value={editableConfig.weeklyPrizesUsdt.first}
                       onChange={(e) => setEditableConfig({
                         ...editableConfig,
@@ -2712,10 +3253,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-300 font-bold block">2nd Prize ($ USDT)</label>
+                    <label className="text-[10px] text-gray-300 font-bold block mb-1">🥈 2nd Prize ($ USDT)</label>
                     <input
                       type="number"
                       step="0.1"
+                      min="0"
                       value={editableConfig.weeklyPrizesUsdt.second}
                       onChange={(e) => setEditableConfig({
                         ...editableConfig,
@@ -2725,10 +3267,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-amber-500 font-bold block">3rd Prize ($ USDT)</label>
+                    <label className="text-[10px] text-amber-500 font-bold block mb-1">🥉 3rd Prize ($ USDT)</label>
                     <input
                       type="number"
                       step="0.1"
+                      min="0"
                       value={editableConfig.weeklyPrizesUsdt.third}
                       onChange={(e) => setEditableConfig({
                         ...editableConfig,
@@ -2739,7 +3282,147 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-[#1E2638] grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {/* Custom Notice Text shown in user frontend */}
+                <div>
+                  <label className="text-[11px] text-gray-300 block font-semibold mb-1">
+                    Frontend Contest Notice / Rules Announcement Banner (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={editableConfig.weeklyContestNoticeText || ''}
+                    onChange={(e) => setEditableConfig({
+                      ...editableConfig,
+                      weeklyContestNoticeText: e.target.value,
+                    })}
+                    placeholder="e.g. Winners will be manually contacted & paid every Saturday at 23:59 UTC!"
+                    className="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl px-3 py-2 text-xs text-white"
+                  />
+                  <span className="text-[10px] text-gray-500 block mt-1">
+                    This message appears directly inside the Weekly Contest information card on user devices.
+                  </span>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    onClick={handleSaveConfig}
+                    disabled={loading}
+                    className="w-full py-2.5 rounded-xl bg-[#FFE600] text-black font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md hover:bg-yellow-400 transition-all font-display uppercase tracking-wide"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Save Contest Settings</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. LIVE SATURDAY-TO-SATURDAY LEADERBOARD REVIEW FOR MANUAL PAYOUT */}
+              <div className="p-4 bg-[#121824] border border-[#252D3D] rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <BarChart3 className="w-3.5 h-3.5 text-[#00E5FF]" />
+                    Live Weekly Leaderboard (Manual Review Table)
+                  </h4>
+                  <span className="text-[10px] text-gray-400 font-mono-digits">
+                    {weeklyContestLeaderboard.length} Ranked Users
+                  </span>
+                </div>
+
+                {weeklyContestLeaderboard.length === 0 ? (
+                  <div className="p-6 text-center text-gray-400 text-xs bg-[#0B0E14] rounded-xl border border-[#1E2638]">
+                    No qualified referrals recorded yet in the current Saturday-to-Saturday cycle.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-[#252D3D] text-[10px] text-gray-400 uppercase tracking-wider font-semibold">
+                          <th className="py-2 px-2">Rank</th>
+                          <th className="py-2 px-2">User / Telegram ID</th>
+                          <th className="py-2 px-2 text-center">Qualified Invites</th>
+                          <th className="py-2 px-2 text-right">POP Earned</th>
+                          <th className="py-2 px-2 text-center">Prize Pool</th>
+                          <th className="py-2 px-2 text-right">Manual Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#1A2234]">
+                        {weeklyContestLeaderboard.map((item, idx) => {
+                          const meetsThreshold = (item.qualifiedReferralCount ?? item.referralCount ?? 0) >= (editableConfig.weeklyContestMinThreshold || 40);
+                          const isTop3 = idx < 3;
+                          return (
+                            <tr key={item.telegramId || idx} className="hover:bg-[#161F30] transition-colors">
+                              <td className="py-2.5 px-2 font-mono-digits font-bold">
+                                {idx === 0 ? '👑 #1' : idx === 1 ? '🥈 #2' : idx === 2 ? '🥉 #3' : `#${idx + 1}`}
+                              </td>
+                              <td className="py-2.5 px-2">
+                                <div className="font-bold text-white flex items-center gap-1">
+                                  <span>@{item.username || 'user'}</span>
+                                </div>
+                                <div className="text-[10px] text-gray-400 font-mono-digits flex items-center gap-1">
+                                  <span>ID: {item.telegramId}</span>
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard?.writeText(item.telegramId);
+                                      setCopiedId(item.telegramId);
+                                      setTimeout(() => setCopiedId(null), 2000);
+                                    }}
+                                    className="text-gray-500 hover:text-white"
+                                    title="Copy Telegram ID"
+                                  >
+                                    <Copy className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-2 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold font-mono-digits ${
+                                  meetsThreshold 
+                                    ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/40' 
+                                    : 'bg-amber-950/40 text-amber-400 border border-amber-500/30'
+                                }`}>
+                                  {item.qualifiedReferralCount ?? item.referralCount ?? 0} {meetsThreshold ? '✓' : `/${editableConfig.weeklyContestMinThreshold}`}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-2 text-right font-mono-digits text-gray-300">
+                                {Math.round(item.totalPopEarnings ?? 0).toLocaleString()} POP
+                              </td>
+                              <td className="py-2.5 px-2 text-center">
+                                {isTop3 && meetsThreshold ? (
+                                  <span className="text-[#FFE600] font-black font-mono-digits text-xs">
+                                    ${(idx === 0 ? editableConfig.weeklyPrizesUsdt.first : idx === 1 ? editableConfig.weeklyPrizesUsdt.second : editableConfig.weeklyPrizesUsdt.third).toFixed(2)} USDT
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-500 text-[10px]">
+                                    {meetsThreshold ? 'Eligible' : 'Below 40'}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-2 text-right">
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(`Telegram ID: ${item.telegramId}, Username: @${item.username}, Rank: #${idx + 1}, Qualified: ${item.qualifiedReferralCount}`);
+                                    haptic.success();
+                                    setCopiedId(item.telegramId);
+                                    setTimeout(() => setCopiedId(null), 2000);
+                                  }}
+                                  className="px-2 py-1 bg-[#1E2638] hover:bg-[#252D3D] text-[10px] text-gray-300 rounded font-semibold transition-all inline-flex items-center gap-1"
+                                >
+                                  {copiedId === item.telegramId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                  <span>{copiedId === item.telegramId ? 'Copied' : 'Copy Info'}</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 4. WITHDRAWAL LIMITS & FEE PROTOCOL */}
+              <div className="p-4 bg-[#121824] border border-[#252D3D] rounded-2xl space-y-3">
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                  Withdrawal Parameters & Fee
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <label className="text-[10px] text-gray-300 block font-semibold">Min Withdrawal ($POP)</label>
                     <input
@@ -2891,7 +3574,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       type="number"
                       min="0"
                       step="50"
-                      value={editableConfig.referralBonusAmount ?? editableConfig.referral_bonus ?? editableConfig.instantReferralBonusPOP ?? 100}
+                      value={editableConfig.referralBonusAmount ?? editableConfig.referral_bonus ?? editableConfig.instantReferralBonusPOP ?? 0}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value) || 0;
                         setEditableConfig({
@@ -2901,7 +3584,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           referralBonusAmount: val,
                         });
                       }}
-                      placeholder="e.g. 100"
+                      placeholder="e.g. 0"
                       className="w-full bg-[#121824] border border-[#252D3D] rounded-xl px-3 py-2 text-xs text-white font-mono-digits focus:border-[#00E5FF] outline-none"
                     />
                     <span className="text-[10px] text-gray-500 block leading-tight">
@@ -2920,7 +3603,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       min="0"
                       max="100"
                       step="1"
-                      value={editableConfig.referralCommissionPercent ?? 10}
+                      value={editableConfig.squadCommissionRate ?? editableConfig.referralCommissionPercent ?? 0}
                       onChange={(e) =>
                         setEditableConfig({
                           ...editableConfig,
@@ -2932,7 +3615,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className="w-full bg-[#121824] border border-[#252D3D] rounded-xl px-3 py-2 text-xs text-white font-mono-digits focus:border-[#00E5FF] outline-none"
                     />
                     <span className="text-[10px] text-gray-500 block leading-tight">
-                      Percentage of mined POP User A earns each time User B claims their storage container. (Default: 10%)
+                      Percentage of mined POP User A earns each time User B claims their storage container.
                     </span>
                   </div>
                 </div>
@@ -2948,7 +3631,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       • <strong className="text-white">Referral Display Guarantee:</strong> Once User B completes TON Wallet connection & joins the Official TG Channel, User B immediately appears in User A's Squad List regardless of device.
                     </p>
                     <p>
-                      • <strong className="text-emerald-400">Case 1 (Different Device):</strong> User B is marked as <span className="text-emerald-400 font-bold font-mono">"QUALIFIED"</span>. User A receives the Flat POP Bonus (+{editableConfig.referralBonusAmount ?? editableConfig.referral_bonus ?? editableConfig.instantReferralBonusPOP ?? 100} POP) and starts earning the {editableConfig.referralCommissionPercent ?? 10}% mining commission.
+                      • <strong className="text-emerald-400">Case 1 (Different Device):</strong> User B is marked as <span className="text-emerald-400 font-bold font-mono">"QUALIFIED"</span>. User A receives the Flat POP Bonus (+{editableConfig.referralBonusAmount ?? editableConfig.referral_bonus ?? editableConfig.instantReferralBonusPOP ?? 0} POP) and starts earning the {editableConfig.squadCommissionRate ?? editableConfig.referralCommissionPercent ?? 0}% mining commission.
                     </p>
                     <p>
                       • <strong className="text-red-400">Case 2 (Same Device / Multi-Account):</strong> User B appears in User A's Squad List marked as <span className="text-red-400 font-bold font-mono">"UNQUALIFIED - SAME DEVICE"</span>. User A receives NO Flat POP bonus and NO mining commission.
@@ -3222,24 +3905,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           )}
 
-          {/* TAB: DYNAMIC AD NETWORK SETTINGS */}
+          {/* TAB: DYNAMIC AD NETWORK SETTINGS (MONETIZE) */}
           {activeAdminTab === 'adNetwork' && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Dynamic Ad Network & Monetization Engine
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Tv className="w-4 h-4 text-sky-400" />
+                  <span>Monetization Engine & Ad Networks</span>
                 </h3>
                 <span className="text-[11px] text-gray-400">
-                  Switch between Adsgram and Monetag in real time with zero server downtime
+                  Configure Adsgram and Monitag dual ad systems with startup delay and daily frequency control
                 </span>
               </div>
 
-              {/* 1. Provider Selector */}
+              {/* Active Provider Selector Bar */}
               <div className="p-4 bg-[#121824] border border-[#252D3D] rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white uppercase">1. Active Ad Provider</span>
-                  <span className="text-[10px] font-mono font-bold bg-[#00E5FF]/20 text-[#00E5FF] px-2 py-0.5 rounded-full border border-[#00E5FF]/30">
-                    CURRENT: {(editableConfig.adProvider || 'adsgram').toUpperCase()}
+                  <span className="text-xs font-bold text-white uppercase">Active Primary Ad Provider</span>
+                  <span className="text-[10px] font-mono font-bold bg-[#00E5FF]/20 text-[#00E5FF] px-2.5 py-0.5 rounded-full border border-[#00E5FF]/30">
+                    ACTIVE: {(editableConfig.adProvider || 'adsgram').toUpperCase()}
                   </span>
                 </div>
 
@@ -3248,22 +3932,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     type="button"
                     onClick={() => {
                       haptic.selection();
-                      setEditableConfig({ ...editableConfig, adProvider: 'adsgram' });
+                      setEditableConfig({
+                        ...editableConfig,
+                        adProvider: 'adsgram',
+                        adProviderSecret: editableConfig.adsgramBlockId || editableConfig.adProviderSecret || '50936'
+                      });
                     }}
-                    className={`p-3.5 rounded-2xl border text-left transition-all ${
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative overflow-hidden ${
                       editableConfig.adProvider === 'adsgram'
-                        ? 'bg-gradient-to-br from-cyan-950/40 to-[#121824] border-[#00E5FF] text-white shadow-lg shadow-cyan-500/20'
+                        ? 'bg-gradient-to-br from-cyan-950/50 via-[#121824] to-[#0E131F] border-[#00E5FF] text-white shadow-lg shadow-cyan-500/20'
                         : 'bg-[#0B0E14] border-[#252D3D] text-gray-400 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-black font-display tracking-tight text-white">Adsgram</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-black font-display tracking-tight text-white flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block animate-pulse" />
+                        Adsgram
+                      </span>
                       {editableConfig.adProvider === 'adsgram' && (
                         <CheckCircle2 className="w-4 h-4 text-[#00E5FF]" />
                       )}
                     </div>
                     <p className="text-[10px] text-gray-400 leading-snug">
-                      Official Telegram Mini App non-skippable 10s rewarded video interstitial ads.
+                      Official Telegram Mini App native non-skippable 10s video interstitial ads.
                     </p>
                   </button>
 
@@ -3271,16 +3962,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     type="button"
                     onClick={() => {
                       haptic.selection();
-                      setEditableConfig({ ...editableConfig, adProvider: 'monetag' });
+                      setEditableConfig({
+                        ...editableConfig,
+                        adProvider: 'monetag',
+                        adProviderSecret: editableConfig.monetagZoneId || editableConfig.adProviderSecret || '7894561'
+                      });
                     }}
-                    className={`p-3.5 rounded-2xl border text-left transition-all ${
+                    className={`p-3.5 rounded-2xl border text-left transition-all relative overflow-hidden ${
                       editableConfig.adProvider === 'monetag'
-                        ? 'bg-gradient-to-br from-amber-950/40 to-[#121824] border-[#FFE600] text-white shadow-lg shadow-amber-500/20'
+                        ? 'bg-gradient-to-br from-amber-950/50 via-[#121824] to-[#0E131F] border-[#FFE600] text-white shadow-lg shadow-amber-500/20'
                         : 'bg-[#0B0E14] border-[#252D3D] text-gray-400 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-sm font-black font-display tracking-tight text-white">Monetag</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-black font-display tracking-tight text-white flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                        Monetag
+                      </span>
                       {editableConfig.adProvider === 'monetag' && (
                         <CheckCircle2 className="w-4 h-4 text-[#FFE600]" />
                       )}
@@ -3292,82 +3990,404 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* 2. AD_PROVIDER_SECRET: Block ID / Zone Key */}
-              <div className="p-4 bg-[#121824] border border-[#252D3D] rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-white uppercase">
-                    2. AD_PROVIDER_SECRET ({editableConfig.adProvider === 'monetag' ? 'Zone Key / Tag ID' : 'Adsgram Block ID'})
-                  </label>
-                  <span className="text-[10px] text-[#FFE600] font-mono">Real-time Injection</span>
-                </div>
+              {/* Sub-Tab Navigation inside Monetize section */}
+              <div className="flex items-center gap-2 p-1.5 bg-[#0B0E14] rounded-2xl border border-[#252D3D]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic.selection();
+                    setMonetizeSubTab('adsgram');
+                  }}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    monetizeSubTab === 'adsgram'
+                      ? 'bg-cyan-500/20 text-[#00E5FF] border border-cyan-500/40 shadow-sm'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                  <span>Adsgram Settings</span>
+                  {editableConfig.adProvider === 'adsgram' && (
+                    <span className="text-[9px] bg-cyan-500 text-black px-1.5 py-0.2 rounded font-black">ACTIVE</span>
+                  )}
+                </button>
 
-                <input
-                  type="text"
-                  value={editableConfig.adProviderSecret || ''}
-                  onChange={(e) => setEditableConfig({
-                    ...editableConfig,
-                    adProviderSecret: e.target.value.trim()
-                  })}
-                  placeholder={editableConfig.adProvider === 'monetag' ? 'e.g. 7894561' : 'e.g. 12345 (or int-12345)'}
-                  className="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:border-[#00E5FF] focus:outline-none"
-                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic.selection();
+                    setMonetizeSubTab('monetag');
+                  }}
+                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    monetizeSubTab === 'monetag'
+                      ? 'bg-amber-500/20 text-[#FFE600] border border-amber-500/40 shadow-sm'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-400" />
+                  <span>Monetag Settings</span>
+                  {editableConfig.adProvider === 'monetag' && (
+                    <span className="text-[9px] bg-amber-500 text-black px-1.5 py-0.2 rounded font-black">ACTIVE</span>
+                  )}
+                </button>
 
-                <p className="text-[10px] text-gray-400">
-                  {editableConfig.adProvider === 'monetag'
-                    ? 'Enter the Monetag Zone ID obtained from your Monetag Publisher dashboard.'
-                    : 'Enter your Adsgram Rewarded/Interstitial Block ID from the Adsgram Bot or Dashboard.'}
-                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic.selection();
+                    setMonetizeSubTab('dual');
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    monetizeSubTab === 'dual'
+                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Dual View</span>
+                </button>
               </div>
 
-              {/* 3. Interstitial Timing Intervals */}
-              <div className="p-4 bg-[#121824] border border-[#252D3D] rounded-2xl space-y-3">
-                <h4 className="text-xs font-bold text-white uppercase">
-                  3. Interstitial 10s Ad Frequency Control
-                </h4>
+              {/* 3. DEDICATED ADSGRAM SECTION */}
+              {(monetizeSubTab === 'adsgram' || monetizeSubTab === 'dual') && (
+                <div className="p-4 bg-[#121824] border border-cyan-500/30 rounded-2xl space-y-4 relative overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-[#252D3D] pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+                        <Tv className="w-4 h-4 text-[#00E5FF]" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-white uppercase flex items-center gap-1.5">
+                          <span>Adsgram Configuration</span>
+                          {editableConfig.adProvider === 'adsgram' ? (
+                            <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono">
+                              ● ACTIVE DEFAULT
+                            </span>
+                          ) : (
+                            <span className="text-[9px] bg-gray-500/20 text-gray-400 border border-gray-500/40 px-2 py-0.5 rounded-full font-mono">
+                              STANDBY
+                            </span>
+                          )}
+                        </h4>
+                        <span className="text-[10px] text-gray-400">
+                          Official Telegram Mini App SDK integration parameters
+                        </span>
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] text-gray-300 block mb-1 font-semibold">
-                      First Ad Popup Delay (Minutes)
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={editableConfig.interstitialAdInitialDelayMinutes || 3}
-                      onChange={(e) => setEditableConfig({
-                        ...editableConfig,
-                        interstitialAdInitialDelayMinutes: parseInt(e.target.value) || 3
-                      })}
-                      className="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl px-3 py-2 text-xs text-white font-mono-digits"
-                    />
-                    <span className="text-[10px] text-gray-500 mt-1 block">Default: Exactly 3 minutes after launch</span>
+                    {editableConfig.adProvider !== 'adsgram' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          haptic.impact('medium');
+                          setEditableConfig({
+                            ...editableConfig,
+                            adProvider: 'adsgram',
+                            adProviderSecret: editableConfig.adsgramBlockId || editableConfig.adProviderSecret || '50936'
+                          });
+                        }}
+                        className="py-1 px-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-[#00E5FF] text-[10px] font-bold border border-cyan-500/40 transition-all"
+                      >
+                        Set as Active
+                      </button>
+                    )}
                   </div>
 
+                  {/* Adsgram Block / Zone ID */}
                   <div>
-                    <label className="text-[11px] text-gray-300 block mb-1 font-semibold">
-                      Recurring Ad Interval (Minutes)
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-bold text-white uppercase flex items-center gap-1">
+                        <span>Adsgram Ad Block / Zone ID</span>
+                        <span className="text-red-400">*</span>
+                      </label>
+                      <span className="text-[10px] text-cyan-400 font-mono">window.Adsgram.init</span>
+                    </div>
                     <input
-                      type="number"
-                      min="1"
-                      value={editableConfig.interstitialAdIntervalMinutes || 5}
-                      onChange={(e) => setEditableConfig({
-                        ...editableConfig,
-                        interstitialAdIntervalMinutes: parseInt(e.target.value) || 5
-                      })}
-                      className="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl px-3 py-2 text-xs text-white font-mono-digits"
+                      type="text"
+                      value={editableConfig.adsgramBlockId || ''}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        setEditableConfig({
+                          ...editableConfig,
+                          adsgramBlockId: val,
+                          adProviderSecret: editableConfig.adProvider === 'adsgram' ? val : editableConfig.adProviderSecret
+                        });
+                      }}
+                      placeholder="e.g. 50936 or int-12345"
+                      className="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:border-[#00E5FF] focus:outline-none"
                     />
-                    <span className="text-[10px] text-gray-500 mt-1 block">Default: Every 5 minutes during active session</span>
+                    <span className="text-[10px] text-gray-400 mt-1 block">
+                      Obtained from your official @AdsgramBot or publisher portal (e.g. 50936).
+                    </span>
+                  </div>
+
+                  {/* Delay time & Frequency controls */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    {/* Bot Open Delay */}
+                    <div className="bg-[#0B0E14] p-3 rounded-xl border border-[#252D3D]">
+                      <label className="text-[11px] font-bold text-white block mb-1">
+                        Bot Open Delay (Minutes)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={editableConfig.adsgramInitialDelayMinutes ?? 3}
+                        onChange={(e) => setEditableConfig({
+                          ...editableConfig,
+                          adsgramInitialDelayMinutes: Math.max(1, parseInt(e.target.value) || 3),
+                          interstitialAdInitialDelayMinutes: Math.max(1, parseInt(e.target.value) || 3)
+                        })}
+                        className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
+                      />
+                      <span className="text-[10px] text-cyan-300 mt-1 block">
+                        Strict 3-min rule: Ad displays ONLY after 3 minutes.
+                      </span>
+                    </div>
+
+                    {/* Startup Ad Daily Limit */}
+                    <div className="bg-[#0B0E14] p-3 rounded-xl border border-[#252D3D]">
+                      <label className="text-[11px] font-bold text-white block mb-1">
+                        Startup Daily Limit
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editableConfig.adsgramStartupDailyLimit ?? 1}
+                        onChange={(e) => setEditableConfig({
+                          ...editableConfig,
+                          adsgramStartupDailyLimit: Math.max(0, parseInt(e.target.value) || 0)
+                        })}
+                        className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
+                      />
+                      <span className="text-[10px] text-gray-400 mt-1 block">
+                        Max startup ad views per user / day (default: 1).
+                      </span>
+                    </div>
+
+                    {/* Claim Mining Reward Ad Daily Limit */}
+                    <div className="bg-[#0B0E14] p-3 rounded-xl border border-[#252D3D]">
+                      <label className="text-[11px] font-bold text-white block mb-1">
+                        Claim Ad Daily Limit
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editableConfig.adsgramClaimDailyLimit ?? 1}
+                        onChange={(e) => setEditableConfig({
+                          ...editableConfig,
+                          adsgramClaimDailyLimit: Math.max(0, parseInt(e.target.value) || 0)
+                        })}
+                        className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
+                      />
+                      <span className="text-[10px] text-emerald-400 mt-1 block font-semibold">
+                        Default 1: Ad shows ONLY on 1st claim of day!
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Adsgram Specific Rule Summary */}
+                  <div className="p-3 bg-cyan-950/20 border border-cyan-500/20 rounded-xl space-y-1.5 text-[11px] text-gray-300">
+                    <div className="flex items-center gap-1.5 text-cyan-300 font-bold text-xs">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Active Adsgram Protocol Rules</span>
+                    </div>
+                    <ul className="space-y-1 text-[10px] text-gray-300 pl-4 list-disc">
+                      <li>
+                        <strong className="text-white">Bot Open Ad:</strong> Triggers strictly after {editableConfig.adsgramInitialDelayMinutes || 3} minutes of opening the bot, frequency-capped at {editableConfig.adsgramStartupDailyLimit ?? 1} view(s)/day.
+                      </li>
+                      <li>
+                        <strong className="text-white">Claim Reward Ad:</strong> Triggers strictly on the <em>first</em> mining claim of the day (limit: {editableConfig.adsgramClaimDailyLimit ?? 1}/day). If user claims 3-4 times later in the day, ZERO ads are shown!
+                      </li>
+                    </ul>
                   </div>
                 </div>
+              )}
+
+              {/* 4. DEDICATED MONETAG SECTION */}
+              {(monetizeSubTab === 'monetag' || monetizeSubTab === 'dual') && (
+                <div className="p-4 bg-[#121824] border border-amber-500/30 rounded-2xl space-y-4 relative overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-[#252D3D] pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+                        <Zap className="w-4 h-4 text-[#FFE600]" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-white uppercase flex items-center gap-1.5">
+                          <span>Monetag Configuration</span>
+                          {editableConfig.adProvider === 'monetag' ? (
+                            <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-mono">
+                              ● ACTIVE DEFAULT
+                            </span>
+                          ) : (
+                            <span className="text-[9px] bg-gray-500/20 text-gray-400 border border-gray-500/40 px-2 py-0.5 rounded-full font-mono">
+                              STANDBY
+                            </span>
+                          )}
+                        </h4>
+                        <span className="text-[10px] text-gray-400">
+                          Programmatic ad tag and web fallback parameters
+                        </span>
+                      </div>
+                    </div>
+
+                    {editableConfig.adProvider !== 'monetag' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          haptic.impact('medium');
+                          setEditableConfig({
+                            ...editableConfig,
+                            adProvider: 'monetag',
+                            adProviderSecret: editableConfig.monetagZoneId || editableConfig.adProviderSecret || '7894561'
+                          });
+                        }}
+                        className="py-1 px-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-[#FFE600] text-[10px] font-bold border border-amber-500/40 transition-all"
+                      >
+                        Set as Active
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Monetag Zone ID / Tag Key */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-bold text-white uppercase flex items-center gap-1">
+                        <span>Monetag Ad ID / Zone Key</span>
+                        <span className="text-red-400">*</span>
+                      </label>
+                      <span className="text-[10px] text-[#FFE600] font-mono">Publisher Zone</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={editableConfig.monetagZoneId || ''}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        setEditableConfig({
+                          ...editableConfig,
+                          monetagZoneId: val,
+                          adProviderSecret: editableConfig.adProvider === 'monetag' ? val : editableConfig.adProviderSecret
+                        });
+                      }}
+                      placeholder="e.g. 7894561"
+                      className="w-full bg-[#0B0E14] border border-[#252D3D] rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:border-[#FFE600] focus:outline-none"
+                    />
+                    <span className="text-[10px] text-gray-400 mt-1 block">
+                      Publisher Zone ID from your Monetag dashboard.
+                    </span>
+                  </div>
+
+                  {/* Delay time & Frequency controls */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    {/* Bot Open Delay */}
+                    <div className="bg-[#0B0E14] p-3 rounded-xl border border-[#252D3D]">
+                      <label className="text-[11px] font-bold text-white block mb-1">
+                        Bot Open Delay (Minutes)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={editableConfig.monetagInitialDelayMinutes ?? 3}
+                        onChange={(e) => setEditableConfig({
+                          ...editableConfig,
+                          monetagInitialDelayMinutes: Math.max(1, parseInt(e.target.value) || 3)
+                        })}
+                        className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
+                      />
+                      <span className="text-[10px] text-amber-300 mt-1 block">
+                        Delay after entering bot (default: 3 minutes).
+                      </span>
+                    </div>
+
+                    {/* Startup Ad Daily Limit */}
+                    <div className="bg-[#0B0E14] p-3 rounded-xl border border-[#252D3D]">
+                      <label className="text-[11px] font-bold text-white block mb-1">
+                        Startup Daily Limit
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editableConfig.monetagStartupDailyLimit ?? 1}
+                        onChange={(e) => setEditableConfig({
+                          ...editableConfig,
+                          monetagStartupDailyLimit: Math.max(0, parseInt(e.target.value) || 0)
+                        })}
+                        className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
+                      />
+                      <span className="text-[10px] text-gray-400 mt-1 block">
+                        Max startup impressions per user/day.
+                      </span>
+                    </div>
+
+                    {/* Claim Reward Ad Daily Limit */}
+                    <div className="bg-[#0B0E14] p-3 rounded-xl border border-[#252D3D]">
+                      <label className="text-[11px] font-bold text-white block mb-1">
+                        Claim Ad Daily Limit
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editableConfig.monetagClaimDailyLimit ?? 1}
+                        onChange={(e) => setEditableConfig({
+                          ...editableConfig,
+                          monetagClaimDailyLimit: Math.max(0, parseInt(e.target.value) || 0)
+                        })}
+                        className="w-full bg-[#121824] border border-[#252D3D] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono-digits"
+                      />
+                      <span className="text-[10px] text-amber-400 mt-1 block font-semibold">
+                        Daily frequency cap for claim reward ad.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Monetag Specific Rule Summary */}
+                  <div className="p-3 bg-amber-950/20 border border-amber-500/20 rounded-xl space-y-1.5 text-[11px] text-gray-300">
+                    <div className="flex items-center gap-1.5 text-amber-300 font-bold text-xs">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Monetag Programmatic Policy</span>
+                    </div>
+                    <ul className="space-y-1 text-[10px] text-gray-300 pl-4 list-disc">
+                      <li>
+                        Independent delay timer ({editableConfig.monetagInitialDelayMinutes || 3} min) and daily impression cap ({editableConfig.monetagStartupDailyLimit ?? 1} startup + {editableConfig.monetagClaimDailyLimit ?? 1} claim).
+                      </li>
+                      <li>
+                        Can be toggled as primary or used seamlessly in multi-platform campaigns.
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* Quick Actions & Reset */}
+              <div className="flex items-center justify-between p-3 bg-[#0B0E14] rounded-xl border border-[#252D3D]">
+                <span className="text-[11px] text-gray-400">
+                  Restore standard rules (3 min startup delay, 1x/day startup ad, 1st claim only)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    haptic.impact('medium');
+                    setEditableConfig({
+                      ...editableConfig,
+                      adsgramInitialDelayMinutes: 3,
+                      adsgramStartupDailyLimit: 1,
+                      adsgramClaimDailyLimit: 1,
+                      monetagInitialDelayMinutes: 3,
+                      monetagStartupDailyLimit: 1,
+                      monetagClaimDailyLimit: 1,
+                      interstitialAdInitialDelayMinutes: 3,
+                    });
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-[10px] font-bold border border-gray-600 transition-all"
+                >
+                  Reset Defaults
+                </button>
               </div>
 
-              {/* 4. Live Database Override Notice */}
+              {/* Live Database Sync notice */}
               <div className="p-3.5 bg-gradient-to-r from-emerald-950/30 to-[#0B0E14] border border-emerald-500/30 rounded-2xl flex items-start gap-3">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <div className="text-[11px] text-gray-300 leading-relaxed">
-                  <span className="font-bold text-emerald-300 block">Live Database Override Active:</span>
-                  Saving new ad settings in the Admin Panel immediately updates the database and switches active ad scripts across all connected Mini App client sessions in real time without restarting or redeploying the backend server.
+                  <span className="font-bold text-emerald-300 block">Live Database Override & Real-Time Sync:</span>
+                  Saving ad settings immediately updates MongoDB Atlas and broadcasts active ad parameters to all connected Mini App sessions without server restart or downtime.
                 </div>
               </div>
 
@@ -3378,7 +4398,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#00E5FF] to-blue-600 hover:from-[#00E5FF]/90 hover:to-blue-500 text-black font-black text-xs flex items-center justify-center gap-2 uppercase tracking-wider shadow-lg shadow-cyan-500/20 active:scale-[0.99]"
               >
                 <Save className="w-4 h-4" />
-                <span>Save Ad Network Settings</span>
+                <span>Save Monetization Settings</span>
               </button>
             </div>
           )}

@@ -8,7 +8,7 @@ export const SquadController = {
    * Resolves the real-time weekly top referral list from MongoDB and reconciles with active in-memory state.
    * Strictly adheres to Saturday-to-Saturday cycle, qualified referrals only, and real-time accuracy.
    */
-  resolveWeeklyLeaderboard: async (currentTelegramId?: string, currentUser?: any, currentQualifiedCount?: number) => {
+  resolveWeeklyLeaderboard: async (currentTelegramId?: string, currentUser?: any) => {
     const config = db.getConfig();
     const minThreshold = config.weeklyContestMinThreshold || 40;
     const prizes = config.weeklyPrizesUsdt || { first: 50, second: 30, third: 20 };
@@ -17,9 +17,9 @@ export const SquadController = {
     const mongoLeaderboard = await getMongoWeeklyReferralLeaderboard(currentTelegramId, minThreshold, prizes);
 
     // 2. Fetch from in-memory engine (Saturday-to-Saturday cycle)
-    const memLeaderboard = db.getWeeklyReferralLeaderboard(currentUser ? currentUser.id : currentTelegramId);
+    const memLeaderboard = db.getWeeklyReferralLeaderboard();
 
-    // 3. Reconcile both lists to guarantee real-time accuracy and zero lag:
+    // 3. Reconcile both lists into a single canonical global map (strictly deduplicated by telegramId)
     const combinedMap = new Map<string, any>();
 
     if (mongoLeaderboard && mongoLeaderboard.length > 0) {
@@ -29,95 +29,46 @@ export const SquadController = {
           const count = item.qualifiedReferralCount ?? item.referralCount ?? 0;
           combinedMap.set(tid, {
             ...item,
+            telegramId: tid,
             referralCount: count,
             qualifiedReferralCount: count,
             totalPopEarnings: Number(item.totalBonusPop ?? 0),
+            earliestQualifiedDate: item.earliestQualifiedDate || item.qualifiedDate,
           });
         }
       }
     }
 
-    for (const mItem of memLeaderboard) {
-      const tid = String(mItem.telegramId).trim();
-      if (!tid) continue;
-      const mCount = mItem.qualifiedReferralCount ?? mItem.referralCount ?? 0;
-      const existing = combinedMap.get(tid);
-      if (!existing) {
-        combinedMap.set(tid, {
-          ...mItem,
-          referralCount: mCount,
-          qualifiedReferralCount: mCount,
-          totalPopEarnings: Number(mItem.totalPopEarnings ?? 0),
-        });
-      } else {
-        const existCount = existing.qualifiedReferralCount ?? existing.referralCount ?? 0;
-        if (mCount > existCount) {
-          existing.referralCount = mCount;
-          existing.qualifiedReferralCount = mCount;
-        }
-        if (mItem.username && (!existing.username || existing.username.startsWith('user_'))) {
-          existing.username = mItem.username;
-        }
-      }
-    }
-
-    // 4. Ensure current user's real-time qualified referrals for the current cycle are strictly synchronized
-    const targetTgId = currentTelegramId || (currentUser?.telegramId ? String(currentUser.telegramId).trim() : '');
-    if (targetTgId) {
-      const tid = targetTgId;
-      const userRefs = currentUser ? db.getUserReferrals(currentUser.id) : db.getUserReferrals(targetTgId);
-      const { startOfCycle, endOfCycle } = getWeeklyCycleBounds();
-      const currentCycleQualifiedRefs = userRefs.filter(r => {
-        const dateStr = (r as any).qualifiedAt || (r as any).created_at || (r as any).joinedAt;
-        if (dateStr) {
-          const t = new Date(dateStr).getTime();
-          if (!isNaN(t) && (t < startOfCycle.getTime() || t >= endOfCycle.getTime())) {
-            return false;
-          }
-        }
-        const s = String(r.status || '').toUpperCase();
-        return s === 'QUALIFIED' || r.isQualified === true;
-      });
-
-      const effectiveCount = Math.max(
-        currentCycleQualifiedRefs.length,
-        currentQualifiedCount ?? 0
-      );
-
-      if (effectiveCount > 0) {
+    if (memLeaderboard && memLeaderboard.length > 0) {
+      for (const mItem of memLeaderboard) {
+        const tid = String(mItem.telegramId).trim();
+        if (!tid) continue;
+        const mCount = mItem.qualifiedReferralCount ?? mItem.referralCount ?? 0;
         const existing = combinedMap.get(tid);
-        const myCount = effectiveCount;
-        const myPop = currentCycleQualifiedRefs.reduce(
-          (total, referral) => total + (Number(referral.bonusAwardedPOP) || 0),
-          0
-        );
-        const earliestDate = currentCycleQualifiedRefs[0]?.qualifiedAt || currentCycleQualifiedRefs[0]?.created_at || currentCycleQualifiedRefs[0]?.joinedAt;
-
         if (!existing) {
           combinedMap.set(tid, {
-            rank: 0,
-            username: currentUser?.username || `user_${tid.slice(-4)}`,
+            ...mItem,
             telegramId: tid,
-            referralCount: myCount,
-            qualifiedReferralCount: myCount,
-            totalPopEarnings: myPop,
-            earliestQualifiedDate: earliestDate,
-            prizeUsdt: 0,
-            isCurrentUser: true,
+            referralCount: mCount,
+            qualifiedReferralCount: mCount,
+            totalPopEarnings: Number(mItem.totalPopEarnings ?? 0),
           });
         } else {
+          // If in-memory count is higher (recent referrals), adopt the higher count
           const existCount = existing.qualifiedReferralCount ?? existing.referralCount ?? 0;
-          if (myCount > existCount) {
-            existing.qualifiedReferralCount = myCount;
-            existing.referralCount = myCount;
+          if (mCount > existCount) {
+            existing.referralCount = mCount;
+            existing.qualifiedReferralCount = mCount;
           }
-          existing.totalPopEarnings = Math.max(Number(existing.totalPopEarnings) || 0, myPop);
-          existing.isCurrentUser = true;
+          existing.totalPopEarnings = Math.max(Number(existing.totalPopEarnings) || 0, Number(mItem.totalPopEarnings) || 0);
+          if (mItem.username && (!existing.username || existing.username.startsWith('user_'))) {
+            existing.username = mItem.username;
+          }
         }
       }
     }
 
-    // 5. Pure Dynamic Descending Ranking:
+    // 4. Pure Dynamic Global Descending Ranking across ALL users:
     // - Primary: Number of Qualified Referrals (Descending: qualifiedReferralCount: -1)
     // - Secondary: Total POP earned from referrals (Descending: totalPopEarnings: -1)
     // - Tertiary: Earliest qualified date (Ascending - first to reach wins tie)
@@ -135,7 +86,9 @@ export const SquadController = {
       return timeA - timeB;
     });
 
-    // 6. Dynamically Assign Rank based on Sorted Position
+    // 5. Assign exact same global rank to all users, highlighting isCurrentUser cleanly
+    const normalizedTgId = currentTelegramId ? String(currentTelegramId).trim() : (currentUser?.telegramId ? String(currentUser.telegramId).trim() : '');
+
     return sortedList.slice(0, 50).map((u, idx) => {
       const count = u.qualifiedReferralCount ?? u.referralCount ?? 0;
       let prize = 0;
@@ -151,7 +104,7 @@ export const SquadController = {
         qualifiedReferralCount: count,
         totalPopEarnings: Number((Number(u.totalPopEarnings) || 0).toFixed(4)),
         prizeUsdt: prize,
-        isCurrentUser: currentTelegramId ? String(u.telegramId) === String(currentTelegramId) : Boolean(u.isCurrentUser),
+        isCurrentUser: Boolean(normalizedTgId && String(u.telegramId).trim() === normalizedTgId),
       };
     });
   },
@@ -225,7 +178,7 @@ export const SquadController = {
           breakdown: { totalJoined: 0, pendingAction: 0, qualified: 0, unqualifiedSameIp: 0 },
           referrals: [],
           my_referral_list: [],
-          weeklyLeaderboard: db.getWeeklyReferralLeaderboard(),
+          weeklyLeaderboard: await SquadController.resolveWeeklyLeaderboard(),
           contestConfig: {
             minThreshold: config.weeklyContestMinThreshold,
             prizes: config.weeklyPrizesUsdt,
@@ -495,7 +448,7 @@ export const SquadController = {
         filteredReferrals = formattedReferrals.filter(r => r.status === 'UNQUALIFIED');
       }
 
-      const weeklyLeaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user, qualifiedCount);
+      const weeklyLeaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user);
 
       res.json({
         success: true,

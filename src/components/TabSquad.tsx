@@ -17,7 +17,8 @@ import {
   RefreshCw,
   Send,
   Play,
-  X
+  X,
+  Lock
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { User, AdminConfig, ReferralUserItem, WeeklyPodiumUser, SquadCounts } from '../types.js';
@@ -70,11 +71,24 @@ export const TabSquad: React.FC<TabSquadProps> = ({
     }
   }, [onRefreshSquad]);
 
-  // Dynamic Referral Bonus strictly from Admin Config / Settings
-  const referralBonus = (config as any).referralBonusAmount ?? (config as any).referral_bonus ?? config.instantReferralBonusPOP ?? 100;
+  // Dynamic Referral Bonus strictly from Admin Config / Settings (zero synthetic fallback)
+  const referralBonus = React.useMemo(() => {
+    const raw = (config as any).referralBonusAmount ?? (config as any).referral_bonus ?? config.instantReferralBonusPOP;
+    if (raw !== undefined && raw !== null && !isNaN(Number(raw))) {
+      return Math.max(0, Number(raw));
+    }
+    return 0;
+  }, [config]);
 
-  // Dynamic Squad Commission Rate strictly from Admin Config / Settings (e.g. 10%, 15%, etc.)
-  const commissionRate = (config as any).squadCommissionRate ?? config.referralCommissionPercent ?? 10;
+  // Dynamic Squad Commission Rate strictly from Admin Config / Settings (zero synthetic fallback)
+  const commissionRate = React.useMemo(() => {
+    const raw = (config as any).squadCommissionRate ?? config.referralCommissionPercent ?? (config as any).referral_commission_percent;
+    if (raw !== undefined && raw !== null && !isNaN(Number(raw))) {
+      return Math.max(0, Math.min(100, Number(raw)));
+    }
+    return 0;
+  }, [config]);
+  const isCapReached = Boolean(config.isCapReached || (config.remainingSupply !== undefined && config.remainingSupply <= 0));
 
   // Deduplicate referrals array strictly by Telegram ID to prevent any duplicate rows
   const cleanReferrals = React.useMemo(() => {
@@ -189,6 +203,11 @@ export const TabSquad: React.FC<TabSquadProps> = ({
   };
 
   const handleClaimCommission = async () => {
+    if (isCapReached) {
+      haptic.warning();
+      return;
+    }
+
     if (!user.tonWalletAddress) {
       haptic.warning();
       onOpenWalletModal();
@@ -440,24 +459,41 @@ export const TabSquad: React.FC<TabSquadProps> = ({
         </div>
 
         {/* Claim Squad Commission Button */}
-        <button
-          onClick={handleClaimCommission}
-          disabled={isClaiming || user.unclaimedSquadPOP <= 0}
-          className={`w-full mt-3 py-3 rounded-2xl font-black text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 font-display ${
-            user.unclaimedSquadPOP > 0
-              ? 'bg-[#00E5FF] hover:bg-[#00E5FF]/90 text-black shadow-lg shadow-cyan-500/20 active:scale-95 neon-glow-blue'
-              : 'bg-[#1E2638] text-gray-500 border border-[#252D3D] cursor-not-allowed'
-          }`}
-        >
-          {isClaiming ? (
-            <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              <span>CLAIM SQUAD COMMISSION</span>
-            </>
-          )}
-        </button>
+        {isCapReached ? (
+          <button
+            disabled
+            className="w-full mt-3 py-3 rounded-2xl font-black text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 font-display bg-red-950/40 text-red-400 border border-red-500/50 cursor-not-allowed select-none"
+          >
+            <Lock className="w-4 h-4 text-red-400" />
+            <span>10M SUPPLY CAP REACHED</span>
+          </button>
+        ) : (
+          <button
+            onClick={handleClaimCommission}
+            disabled={isClaiming || user.unclaimedSquadPOP <= 0}
+            className={`w-full mt-3 py-3 rounded-2xl font-black text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 font-display ${
+              user.unclaimedSquadPOP > 0
+                ? 'bg-[#00E5FF] hover:bg-[#00E5FF]/90 text-black shadow-lg shadow-cyan-500/20 active:scale-95 neon-glow-blue'
+                : 'bg-[#1E2638] text-gray-500 border border-[#252D3D] cursor-not-allowed'
+            }`}
+          >
+            {isClaiming ? (
+              <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>CLAIM SQUAD COMMISSION</span>
+              </>
+            )}
+          </button>
+        )}
+
+        {isCapReached && (
+          <div className="mt-3 p-2.5 bg-red-950/40 border border-red-500/50 text-red-200 rounded-xl text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>The 10,000,000 POP total supply cap has been reached. Squad commission claims are locked.</span>
+          </div>
+        )}
 
         {claimSuccess && (
           <div className="mt-3 p-2.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1.5">
@@ -568,33 +604,66 @@ export const TabSquad: React.FC<TabSquadProps> = ({
         </div>
       </div>
 
-      {/* 4. WEEKLY CONTEST REWARD NOTICE CARD */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-[#161F30] to-[#121824] border border-[#FFE600]/30 shadow-md">
-        <div className="flex items-center gap-2 mb-2">
-          <Award className="w-4 h-4 text-[#FFE600]" />
-          <h4 className="text-xs font-black text-white font-display uppercase tracking-wide">
-            🏆 Weekly Referral Contest Rules
-          </h4>
+      {/* 4. WEEKLY CONTEST REWARD NOTICE CARD (100% MANUAL PAYOUT NOTICE & ADMIN CONFIGURED PRIZE POOL) */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-[#161F30] to-[#121824] border border-[#FFE600]/40 shadow-lg space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Award className="w-4 h-4 text-[#FFE600]" />
+            <h4 className="text-xs font-black text-white font-display uppercase tracking-wide">
+              🏆 Weekly Referral Contest (Saturday to Saturday)
+            </h4>
+          </div>
+          <span className="text-[9px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-2 py-0.5 rounded-full uppercase">
+            Manual Review
+          </span>
         </div>
-        <p className="text-[11px] text-gray-300 leading-relaxed">
-          Minimum <b className="text-[#FFE600] font-mono-digits">{config.weeklyContestMinThreshold} Qualified Referrals</b> in 7 days to qualify.
-        </p>
-        <div className="grid grid-cols-3 gap-1.5 mt-2.5 text-center text-[10px]">
-          <div className="p-2 rounded-xl bg-[#0B0E14] border border-[#FFE600]/40">
-            <span className="text-[#FFE600] block font-extrabold">👑 1st Place</span>
-            <span className="text-white font-bold font-mono-digits">${config.weeklyPrizesUsdt.first.toFixed(2)} USDT</span>
+
+        <div className="p-2.5 bg-[#0B0E14] border border-[#252D3D] rounded-xl space-y-1">
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-200">
+            <span className="text-[#FFE600] font-bold">📜 Contest Rule:</span>
+            <span>
+              Minimum <strong className="text-[#FFE600] font-mono-digits">{config.weeklyContestMinThreshold} Qualified Referrals</strong> achieved between <strong>Saturday to Saturday</strong> to qualify for prizes.
+            </span>
           </div>
-          <div className="p-2 rounded-xl bg-[#0B0E14] border border-gray-400/40">
-            <span className="text-gray-300 block font-extrabold">🥈 2nd Place</span>
-            <span className="text-white font-bold font-mono-digits">${config.weeklyPrizesUsdt.second.toFixed(2)} USDT</span>
-          </div>
-          <div className="p-2 rounded-xl bg-[#0B0E14] border border-amber-600/40">
-            <span className="text-amber-500 block font-extrabold">🥉 3rd Place</span>
-            <span className="text-white font-bold font-mono-digits">${config.weeklyPrizesUsdt.third.toFixed(2)} USDT</span>
+          <div className="text-[10px] text-gray-400 flex items-center gap-1">
+            <span>* Qualified criteria: TON Wallet Connected + Official Channel Joined + Mining Started.</span>
           </div>
         </div>
-        <div className="mt-2 text-[10px] text-gray-400 italic">
-          *Qualification Rule: Referred user is QUALIFIED only after joining official channel, connecting TON wallet, and starting mining.
+
+        {/* Prize Pool Display */}
+        <div>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-1">
+            Weekly Prize Pool (Configured by Admin)
+          </span>
+          <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+            <div className="p-2 rounded-xl bg-[#0B0E14] border border-[#FFE600]/50 shadow-sm">
+              <span className="text-[#FFE600] block font-extrabold">👑 1st Place</span>
+              <span className="text-white font-bold font-mono-digits text-xs">${config.weeklyPrizesUsdt.first.toFixed(2)} USDT</span>
+            </div>
+            <div className="p-2 rounded-xl bg-[#0B0E14] border border-gray-400/50 shadow-sm">
+              <span className="text-gray-300 block font-extrabold">🥈 2nd Place</span>
+              <span className="text-white font-bold font-mono-digits text-xs">${config.weeklyPrizesUsdt.second.toFixed(2)} USDT</span>
+            </div>
+            <div className="p-2 rounded-xl bg-[#0B0E14] border border-amber-600/50 shadow-sm">
+              <span className="text-amber-500 block font-extrabold">🥉 3rd Place</span>
+              <span className="text-white font-bold font-mono-digits text-xs">${config.weeklyPrizesUsdt.third.toFixed(2)} USDT</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Custom Admin Announcement / Notice if configured */}
+        {config.weeklyContestNoticeText && (
+          <div className="p-2 rounded-xl bg-amber-950/20 border border-amber-500/30 text-[10px] text-amber-200 flex items-start gap-1.5">
+            <span className="text-amber-400 font-bold shrink-0">📢 Notice:</span>
+            <span>{config.weeklyContestNoticeText}</span>
+          </div>
+        )}
+
+        {/* Transparent Manual Payout Notice */}
+        <div className="pt-1 text-[10px] text-gray-400 flex items-center justify-between border-t border-[#1E2638]">
+          <span className="flex items-center gap-1 text-gray-300">
+            ℹ️ <span className="text-gray-400">Payouts are completely manual: Admins verify rankings & send rewards directly after cycle completion.</span>
+          </span>
         </div>
       </div>
 
@@ -639,16 +708,16 @@ export const TabSquad: React.FC<TabSquadProps> = ({
             <div className="p-3 rounded-2xl bg-[#121824] border border-gray-400/30 text-center flex flex-col items-center shadow-lg">
               <span className="text-xs font-extrabold text-gray-300">🥈 2nd</span>
               <div className="w-10 h-10 rounded-full bg-[#1A2234] border border-gray-400/50 my-1.5 flex items-center justify-center font-bold text-xs text-white">
-                {rank2?.username?.slice(0, 2).toUpperCase() || '2N'}
+                {rank2?.username ? rank2.username.slice(0, 2).toUpperCase() : '2N'}
               </div>
               <span className="text-xs font-bold text-white truncate max-w-full">
-                @{rank2?.username || 'user'}
+                {rank2?.username ? `@${rank2.username}` : 'Open Slot'}
               </span>
               <span className="text-[11px] font-black text-[#FFE600] font-mono-digits mt-1">
-                {rank2?.referralCount || 0} refs
+                {rank2 ? `${rank2.referralCount} refs` : '-'}
               </span>
               <span className="text-[9px] text-gray-400 font-mono-digits">
-                {Math.round(rank2?.totalPopEarnings || 0)} POP
+                {rank2 ? `${Math.round(rank2.totalPopEarnings || 0)} POP` : '-'}
               </span>
             </div>
 
@@ -659,16 +728,16 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                 <span className="text-xs font-black uppercase font-display">1st Winner</span>
               </div>
               <div className="w-12 h-12 rounded-full bg-[#FFE600]/20 border-2 border-[#FFE600] my-1.5 flex items-center justify-center font-black text-sm text-[#FFE600]">
-                {rank1?.username?.slice(0, 2).toUpperCase() || '1S'}
+                {rank1?.username ? rank1.username.slice(0, 2).toUpperCase() : '1S'}
               </div>
               <span className="text-xs font-black text-white truncate max-w-full">
-                @{rank1?.username || 'user'}
+                {rank1?.username ? `@${rank1.username}` : 'No Leader Yet'}
               </span>
               <span className="text-xs font-black text-[#FFE600] font-mono-digits mt-1">
-                {rank1?.referralCount || 0} refs
+                {rank1 ? `${rank1.referralCount} refs` : '-'}
               </span>
               <span className="text-[10px] text-emerald-400 font-mono-digits font-bold">
-                {Math.round(rank1?.totalPopEarnings || 0)} POP
+                {rank1 ? `${Math.round(rank1.totalPopEarnings || 0)} POP` : '-'}
               </span>
             </div>
 
@@ -676,16 +745,16 @@ export const TabSquad: React.FC<TabSquadProps> = ({
             <div className="p-3 rounded-2xl bg-[#121824] border border-amber-600/30 text-center flex flex-col items-center shadow-lg">
               <span className="text-xs font-extrabold text-amber-500">🥉 3rd</span>
               <div className="w-10 h-10 rounded-full bg-[#1A2234] border border-amber-600/50 my-1.5 flex items-center justify-center font-bold text-xs text-white">
-                {rank3?.username?.slice(0, 2).toUpperCase() || '3R'}
+                {rank3?.username ? rank3.username.slice(0, 2).toUpperCase() : '3R'}
               </div>
               <span className="text-xs font-bold text-white truncate max-w-full">
-                @{rank3?.username || 'user'}
+                {rank3?.username ? `@${rank3.username}` : 'Open Slot'}
               </span>
               <span className="text-[11px] font-black text-[#FFE600] font-mono-digits mt-1">
-                {rank3?.referralCount || 0} refs
+                {rank3 ? `${rank3.referralCount} refs` : '-'}
               </span>
               <span className="text-[9px] text-gray-400 font-mono-digits">
-                {Math.round(rank3?.totalPopEarnings || 0)} POP
+                {rank3 ? `${Math.round(rank3.totalPopEarnings || 0)} POP` : '-'}
               </span>
             </div>
           </div>
@@ -905,7 +974,7 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                             <span className="text-gray-400">Bonus Earned:</span>
                             {isQualified ? (
                               <span className="text-emerald-400 font-black font-mono-digits">
-                                +{ref.bonusAwardedPOP && ref.bonusAwardedPOP !== 200 ? ref.bonusAwardedPOP : referralBonus} POP
+                                +{ref.bonusAwardedPOP !== undefined && ref.bonusAwardedPOP > 0 ? ref.bonusAwardedPOP : referralBonus} POP
                               </span>
                             ) : isSameIp ? (
                               <span className="text-red-400 font-bold font-mono-digits">

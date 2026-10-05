@@ -1998,7 +1998,7 @@ class DatabaseEngine {
 
     // Calculate referral counts across all users
     this.referrals.forEach((referredList, inviterId) => {
-      const inviter = this.users.get(inviterId);
+      const inviter = this.users.get(inviterId) || this.getUser(inviterId);
       if (!inviter || inviter.isFlagged || isMockOrDummyUser(inviter)) return;
 
       const tid = String(inviter.telegramId).trim();
