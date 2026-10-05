@@ -509,13 +509,21 @@ app.get('/api/referrals/squad', SquadController.getMyReferrals);
 app.get('/api/squad', SquadController.getMyReferrals);
 app.get('/api/squad/weekly-leaderboard', SquadController.getWeeklyLeaderboard);
 app.get('/api/leaderboard/weekly', SquadController.getWeeklyLeaderboard);
+app.get('/api/leaderboard/referrals', SquadController.getWeeklyLeaderboard);
+app.get('/api/leaderboard/referral', SquadController.getWeeklyLeaderboard);
+app.get('/api/leaderboard', (req: Request, res: Response) => {
+  if (req.query.type === 'global' || req.query.category === 'global' || req.query.category === 'mining') {
+    return handleGlobalLeaderboard(req, res);
+  }
+  return SquadController.getWeeklyLeaderboard(req, res);
+});
 app.post('/api/squad/claim', SquadController.claimCommission);
 
 // ---------------------------------------------------------------------
 // 7. GLOBAL LEADERBOARD
 // ---------------------------------------------------------------------
 
-app.get('/api/leaderboard/global', async (req: Request, res: Response) => {
+const handleGlobalLeaderboard = async (req: Request, res: Response) => {
   try {
     const telegramId = (req.headers['x-telegram-id'] as string) || '';
     const user = telegramId ? db.getUser(telegramId) : null;
@@ -533,7 +541,9 @@ app.get('/api/leaderboard/global', async (req: Request, res: Response) => {
     console.warn('[Leaderboard] Global leaderboard error:', err);
     res.json({ success: true, leaderboard: db.getGlobalLeaderboard() });
   }
-});
+};
+
+app.get('/api/leaderboard/global', handleGlobalLeaderboard);
 
 // ---------------------------------------------------------------------
 // 8. WALLET & WITHDRAWAL OPERATIONS

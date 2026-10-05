@@ -34,20 +34,23 @@ export function calculateLeaderboardWindow(filter?: string, customStart?: string
     };
   }
 
-  if (normalizedFilter === 'custom' && customStart) {
-    const sDate = new Date(customStart);
-    const eDate = customEnd ? new Date(customEnd) : now;
-    eDate.setUTCHours(23, 59, 59, 999);
-    return {
-      startTime: isNaN(sDate.getTime()) ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) : sDate,
-      endTime: isNaN(eDate.getTime()) ? now : eDate,
-      label: 'Custom Range',
-      filter: 'custom',
-    };
+  if (customStart || normalizedFilter === 'custom') {
+    if (customStart) {
+      const sDate = new Date(customStart);
+      sDate.setUTCHours(0, 0, 0, 0);
+      const eDate = customEnd ? new Date(customEnd) : new Date(customStart);
+      eDate.setUTCHours(23, 59, 59, 999);
+      return {
+        startTime: isNaN(sDate.getTime()) ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) : sDate,
+        endTime: isNaN(eDate.getTime()) ? now : eDate,
+        label: 'Custom Range',
+        filter: 'custom',
+      };
+    }
   }
 
-  // Default: Saturday-to-Saturday Contest Window
-  const { startOfCycle, endOfCycle } = getWeeklyCycleBounds();
+  // Default: Saturday-to-Saturday Contest Window (start of current Saturday to end of current Saturday)
+  const { startOfCycle, endOfCycle } = getWeeklyCycleBounds(now);
   return {
     startTime: startOfCycle,
     endTime: endOfCycle,
@@ -100,14 +103,17 @@ export const SquadController = {
         const tid = String(item.telegramId).trim();
         if (tid) {
           const count = item.qualifiedReferralCount ?? item.referralCount ?? 0;
-          combinedMap.set(tid, {
-            ...item,
-            telegramId: tid,
-            referralCount: count,
-            qualifiedReferralCount: count,
-            totalPopEarnings: Number(item.totalBonusPop ?? 0),
-            earliestQualifiedDate: item.earliestQualifiedDate || item.qualifiedDate,
-          });
+          // Strictly only include if qualified referrals exist within the active window
+          if (count > 0) {
+            combinedMap.set(tid, {
+              ...item,
+              telegramId: tid,
+              referralCount: count,
+              qualifiedReferralCount: count,
+              totalPopEarnings: Number(item.totalBonusPop ?? 0),
+              earliestQualifiedDate: item.earliestQualifiedDate || item.qualifiedDate,
+            });
+          }
         }
       }
     }
@@ -117,6 +123,8 @@ export const SquadController = {
         const tid = String(mItem.telegramId).trim();
         if (!tid) continue;
         const mCount = mItem.qualifiedReferralCount ?? mItem.referralCount ?? 0;
+        // Strictly only include if qualified referrals exist within the active window
+        if (mCount <= 0) continue;
         const existing = combinedMap.get(tid);
         if (!existing) {
           combinedMap.set(tid, {
@@ -127,7 +135,7 @@ export const SquadController = {
             totalPopEarnings: Number(mItem.totalPopEarnings ?? 0),
           });
         } else {
-          // If in-memory count is higher (recent referrals), adopt the higher count
+          // If in-memory count is higher (e.g. freshly verified referral in same window), adopt it
           const existCount = existing.qualifiedReferralCount ?? existing.referralCount ?? 0;
           if (mCount > existCount) {
             existing.referralCount = mCount;
@@ -194,11 +202,15 @@ export const SquadController = {
       const user = telegramId ? db.getUser(telegramId) : undefined;
 
       const filter = (req.query.timeRange as string) || (req.query.dateFilter as string) || (req.query.filter as string) || 'weekly';
-      const startDate = req.query.startDate as string;
-      const endDate = req.query.endDate as string;
+      const startDate = (req.query.startDate as string) || (req.query.start as string) || (req.query.from as string);
+      const endDate = (req.query.endDate as string) || (req.query.end as string) || (req.query.to as string);
 
       const windowInfo = calculateLeaderboardWindow(filter, startDate, endDate);
-      const leaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user, { filter, startDate, endDate });
+      const leaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user, {
+        filter: windowInfo.filter,
+        startDate: windowInfo.startTime.toISOString(),
+        endDate: windowInfo.endTime.toISOString(),
+      });
 
       res.json({
         success: true,
@@ -522,6 +534,16 @@ export const SquadController = {
         unqualifiedSameIp: sameIpCount,
       };
 
+      // Contest time window filtering:
+      const contestFilter = String(
+        req.query.timeRange ||
+        req.query.dateFilter ||
+        (['weekly', '7d', '30d', 'custom'].includes(String(req.query.filter || '').toLowerCase()) ? req.query.filter : 'weekly')
+      ).toLowerCase().trim();
+      const startDate = (req.query.startDate as string) || (req.query.start as string) || (req.query.from as string);
+      const endDate = (req.query.endDate as string) || (req.query.end as string) || (req.query.to as string);
+      const windowInfo = calculateLeaderboardWindow(contestFilter, startDate, endDate);
+
       // Support dynamic filtering parameter (All, Pending Action, Qualified, Unqualified)
       const filterParam = String(req.query.status || req.query.filter || 'ALL').toUpperCase().trim();
       let filteredReferrals = formattedReferrals;
@@ -533,34 +555,61 @@ export const SquadController = {
         filteredReferrals = formattedReferrals.filter(r => r.status === 'UNQUALIFIED');
       }
 
-      // Contest time window filtering:
-      const contestFilter = String(
-        req.query.timeRange ||
-        req.query.dateFilter ||
-        (['weekly', '7d', '30d', 'custom'].includes(String(req.query.filter || '').toLowerCase()) ? req.query.filter : 'weekly')
-      ).toLowerCase().trim();
-      const startDate = req.query.startDate as string;
-      const endDate = req.query.endDate as string;
-      const windowInfo = calculateLeaderboardWindow(contestFilter, startDate, endDate);
+      // If an explicit date range is filtered, filter referral rows strictly by joined timestamp
+      const hasDateFilter = Boolean(req.query.startDate || req.query.endDate || req.query.timeRange || req.query.dateFilter);
+      if (hasDateFilter) {
+        filteredReferrals = filteredReferrals.filter(r => {
+          const joinedVal = (r as any).joined || r.joinedAt || (r as any).joined_at || r.created_at;
+          if (!joinedVal) return false;
+          const t = new Date(joinedVal).getTime();
+          return !isNaN(t) && t >= windowInfo.startTime.getTime() && t <= windowInfo.endTime.getTime();
+        });
+      }
+
+      let dynamicTotalJoined = totalJoined;
+      let dynamicPendingCount = pendingCount;
+      let dynamicQualifiedCount = qualifiedCount;
+      let dynamicSameIpCount = sameIpCount;
+
+      if (hasDateFilter) {
+        dynamicQualifiedCount = filteredReferrals.filter(r => r.status === 'QUALIFIED').length;
+        dynamicSameIpCount = filteredReferrals.filter(r => r.status === 'UNQUALIFIED').length;
+        dynamicPendingCount = filteredReferrals.filter(r => r.status === 'PENDING').length;
+        dynamicTotalJoined = filteredReferrals.length;
+      }
+
+      const countsOutput = {
+        total: dynamicTotalJoined,
+        pending: dynamicPendingCount,
+        qualified: dynamicQualifiedCount,
+        same_ip: dynamicSameIpCount,
+      };
+
+      const breakdownOutput = {
+        totalJoined: dynamicTotalJoined,
+        pendingAction: dynamicPendingCount,
+        qualified: dynamicQualifiedCount,
+        unqualifiedSameIp: dynamicSameIpCount,
+      };
 
       const weeklyLeaderboard = await SquadController.resolveWeeklyLeaderboard(telegramId, user, {
-        filter: contestFilter,
-        startDate,
-        endDate,
+        filter: windowInfo.filter,
+        startDate: windowInfo.startTime.toISOString(),
+        endDate: windowInfo.endTime.toISOString(),
       });
 
       res.json({
         success: true,
-        total_joined: totalJoined,
-        pending_action: pendingCount,
-        qualified: qualifiedCount,
-        unqualified_same_ip: sameIpCount,
+        total_joined: dynamicTotalJoined,
+        pending_action: dynamicPendingCount,
+        qualified: dynamicQualifiedCount,
+        unqualified_same_ip: dynamicSameIpCount,
         referral_bonus: dynamicBonus,
         referralBonusAmount: dynamicBonus,
         squadCommissionRate: dynamicCommissionRate,
         referralCommissionPercent: dynamicCommissionRate,
-        counts,
-        breakdown,
+        counts: countsOutput,
+        breakdown: breakdownOutput,
         referrals: filteredReferrals,
         my_referral_list: filteredReferrals,
         weeklyLeaderboard,

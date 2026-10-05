@@ -2018,12 +2018,13 @@ class DatabaseEngine {
       seenInviters.add(tid);
 
       // Filter out dummy referrals and only count referrals made in current weekly cycle/filter window
+      // Strictly filter by joined timestamp: joined >= startTime AND joined <= endTime
       const cycleReferredList = referredList.filter(r => {
         if (isMockOrDummyUser(r)) return false;
-        const dateStr = (r as any).qualifiedAt || (r as any).created_at || (r as any).joinedAt;
-        if (!dateStr) return false;
-        const t = new Date(dateStr).getTime();
-        if (isNaN(t) || t < startTime.getTime() || t >= endTime.getTime()) {
+        const joinedDateVal = (r as any).joined || (r as any).joinedAt || (r as any).joined_at || (r as any).created_at;
+        if (!joinedDateVal) return false;
+        const t = new Date(joinedDateVal).getTime();
+        if (isNaN(t) || t < startTime.getTime() || t > endTime.getTime()) {
           return false;
         }
         return true;
@@ -2036,13 +2037,14 @@ class DatabaseEngine {
       });
 
       const qualifiedCount = qualifiedList.length;
+      // If no referrals exist within this window, the count must be 0 (never fall back to all-time counts)
       if (qualifiedCount === 0) return;
 
       const totalPop = qualifiedList.reduce(
         (total, referral) => total + (Number(referral.bonusAwardedPOP) || 0),
         0
       );
-      const earliestDate = qualifiedList[0]?.qualifiedAt || qualifiedList[0]?.created_at || qualifiedList[0]?.joinedAt;
+      const earliestDate = (qualifiedList[0] as any)?.joined || qualifiedList[0]?.joinedAt || (qualifiedList[0] as any)?.joined_at || qualifiedList[0]?.created_at;
 
       list.push({
         rank: 0,

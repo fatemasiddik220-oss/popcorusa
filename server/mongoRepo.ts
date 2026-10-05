@@ -793,25 +793,29 @@ export async function getMongoGlobalLeaderboard(currentTelegramId?: string): Pro
 
 /**
  * Calculates the current weekly cycle window strictly for the Saturday-to-Saturday UTC cycle.
- * Saturday is the culmination/contest day of the 7-day cycle, ensuring all referrals made during
- * the week (including Saturday) are strictly synchronized and never prematurely cleared.
+ * When the 'Sat-Sat' filter (or default weekly view) is active, returns the start of the current
+ * Saturday (00:00:00.000 UTC) to the end of the current Saturday (23:59:59.999 UTC).
  */
 export function getWeeklyCycleBounds(now: Date = new Date()): { startOfCycle: Date; endOfCycle: Date } {
   const current = new Date(now);
   const day = current.getUTCDay(); // 0 is Sunday, 6 is Saturday
-  // Saturday (6) is culmination day of the cycle: look back 7 days to previous Saturday.
-  // Sunday (0) is day 1 of new cycle: look back 1 day to Saturday, etc.
-  const diffToSaturday = day === 6 ? 7 : (day + 1);
+  const daysSinceSaturday = (day + 1) % 7; // 0 on Saturday, 1 on Sunday, 2 on Monday, ..., 6 on Friday
 
+  // Start of current Saturday at 00:00:00.000 UTC
   const startOfCycle = new Date(Date.UTC(
     current.getUTCFullYear(),
     current.getUTCMonth(),
-    current.getUTCDate() - diffToSaturday,
+    current.getUTCDate() - daysSinceSaturday,
     0, 0, 0, 0
   ));
 
-  // End of cycle is end of Saturday 23:59:59.999 UTC (i.e. Sunday 00:00:00.000 UTC)
-  const endOfCycle = new Date(startOfCycle.getTime() + 8 * 24 * 60 * 60 * 1000);
+  // End of current Saturday at 23:59:59.999 UTC
+  const endOfCycle = new Date(Date.UTC(
+    startOfCycle.getUTCFullYear(),
+    startOfCycle.getUTCMonth(),
+    startOfCycle.getUTCDate(),
+    23, 59, 59, 999
+  ));
 
   return { startOfCycle, endOfCycle };
 }
@@ -874,11 +878,12 @@ export async function autoReconcileReferralsInMongo(): Promise<void> {
 /**
  * Retrieves the Weekly Top Referral List from MongoDB using an aggregation pipeline.
  * Adheres strictly to:
- * 1. SATURDAY-TO-SATURDAY CYCLE: Referrals marked as QUALIFIED within startOfCycle and endOfCycle.
+ * 1. DATE BOUNDARIES: Filter referral rows where joined timestamp falls strictly between cycleStart and cycleEnd (inclusive).
  * 2. ONLY QUALIFIED REFERRALS: status === 'QUALIFIED' / 'Qualified'.
  * 3. REAL-TIME ACCURACY: Dynamic aggregation over ReferralLogModel joined with UserModel.
  * 4. SORTING: Primary = qualifiedReferralCount (DESC), Secondary = totalPopEarnings (DESC), Tertiary = earliestQualifiedDate (ASC).
  * 5. EXCLUSIVE REFERRAL BONUS DISPLAY (NO COMMISSIONS): sum of recorded qualification bonuses.
+ * 6. ZERO FALLBACK: Users with 0 referrals within the selected window have a count of 0 and never fall back to all-time counts.
  */
 export async function getMongoWeeklyReferralLeaderboard(
   currentTelegramId?: string,
@@ -897,8 +902,28 @@ export async function getMongoWeeklyReferralLeaderboard(
     const cycleStart = filterStart || bounds.startOfCycle;
     const cycleEnd = filterEnd || bounds.endOfCycle;
 
+    // Expression to dynamically resolve the referral's joined timestamp
+    const joinedExpr = {
+      $toDate: {
+        $ifNull: [
+          '$joined',
+          {
+            $ifNull: [
+              '$joined_at',
+              {
+                $ifNull: [
+                  '$joinedAt',
+                  '$created_at'
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    };
+
     const pipeline: any[] = [
-      // 1. Match ONLY referrals marked as QUALIFIED within current cycle / filter window
+      // 1. Match ONLY referrals marked as QUALIFIED where joined timestamp >= cycleStart AND joined <= cycleEnd
       {
         $match: {
           $or: [
@@ -909,18 +934,8 @@ export async function getMongoWeeklyReferralLeaderboard(
           referrer_id: { $nin: EXCLUDED_DUMMY_IDS },
           $expr: {
             $and: [
-              {
-                $gte: [
-                  { $ifNull: ['$qualified_at', { $ifNull: ['$updated_at', '$created_at'] }] },
-                  cycleStart,
-                ],
-              },
-              {
-                $lt: [
-                  { $ifNull: ['$qualified_at', { $ifNull: ['$updated_at', '$created_at'] }] },
-                  cycleEnd,
-                ],
-              },
+              { $gte: [joinedExpr, cycleStart] },
+              { $lte: [joinedExpr, cycleEnd] },
             ],
           },
         },
@@ -931,7 +946,7 @@ export async function getMongoWeeklyReferralLeaderboard(
           _id: { referrer_id: '$referrer_id', referred_id: '$referred_id' },
           referrer_id: { $first: '$referrer_id' },
           bonus_awarded: { $first: '$bonus_awarded' },
-          qualifiedDate: { $first: { $ifNull: ['$qualified_at', { $ifNull: ['$updated_at', '$created_at'] }] } },
+          joinedDate: { $first: joinedExpr },
         },
       },
       // 3. Aggregate count and total bonus earned per referrer, and track earliest qualification date
@@ -941,7 +956,7 @@ export async function getMongoWeeklyReferralLeaderboard(
           referrer_id: { $first: '$referrer_id' },
           qualifiedReferralCount: { $sum: 1 },
           totalBonusPop: { $sum: { $ifNull: ['$bonus_awarded', 0] } },
-          earliestQualifiedDate: { $min: '$qualifiedDate' },
+          earliestQualifiedDate: { $min: '$joinedDate' },
         },
       },
       // 4. Lookup inviter in UserModel to retrieve username
