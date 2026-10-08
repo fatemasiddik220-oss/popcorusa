@@ -951,7 +951,7 @@ export const TabWallet: React.FC<TabWalletProps> = ({
 
             <div className="grid grid-cols-2 gap-2">
               <a
-                href="https://dedust.io"
+                href="https://dedust.io/swap/USDT/EQBJR76LKeOC4MA113ORjgj5E3G-H8e5LT7HO6Vu-YMU2tYb"
                 target="_blank"
                 rel="noreferrer"
                 className="py-2.5 px-3 rounded-xl bg-[#1A2234] hover:bg-[#252D3D] border border-[#252D3D] text-xs font-bold text-white flex items-center justify-center gap-1"
@@ -960,7 +960,7 @@ export const TabWallet: React.FC<TabWalletProps> = ({
                 <ExternalLink className="w-3 h-3" />
               </a>
               <a
-                href="https://ston.fi"
+                href="https://app.ston.fi/swap?chartVisible=false&ft=USD%E2%82%AE&tt=EQBJR76LKeOC4MA113ORjgj5E3G-H8e5LT7HO6Vu-YMU2tYb"
                 target="_blank"
                 rel="noreferrer"
                 className="py-2.5 px-3 rounded-xl bg-[#1A2234] hover:bg-[#252D3D] border border-[#252D3D] text-xs font-bold text-white flex items-center justify-center gap-1"
