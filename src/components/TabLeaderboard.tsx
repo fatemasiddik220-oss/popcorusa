@@ -180,7 +180,7 @@ export const TabLeaderboard: React.FC<TabLeaderboardProps> = ({
                 </span>
               </div>
               <div className="text-[10px] text-gray-400">
-                * Qualified criteria: TON Wallet Connected + Official Channel Joined + Mining Started.
+                * Qualified criteria: Official Channel Joined + at least 3 Tasks Completed + Unique User ID (Anti-Sybil).
               </div>
             </div>
 

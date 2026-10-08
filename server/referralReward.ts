@@ -284,6 +284,14 @@ export async function verifyReferralStatus(params: {
           )
     );
 
+    const completedTasksCount = Math.max(
+      Array.isArray(memReferredUser?.completedTasks) ? memReferredUser.completedTasks.length : 0,
+      Array.isArray(userDoc?.completed_tasks) ? userDoc.completed_tasks.length : 0,
+      db.getCompletedTasksCount(cleanReferredId)
+    );
+    const hasThreeTasks = completedTasksCount >= 3;
+    const requirementsCompleted = hasChannel && hasThreeTasks;
+
     // 3. Resolve IP and Device information
     const inviterIp = memReferrer?.ipAddress || existingLog?.inviter_ip;
     const inviterDevice = memReferrer?.deviceFingerprint || existingLog?.inviter_device;
@@ -365,11 +373,11 @@ export async function verifyReferralStatus(params: {
       };
     }
 
-    // RULE 2: MISSING TON WALLET OR MISSING CHANNEL -> STRICTLY PENDING ACTION
-    if (!hasWallet || !hasChannel) {
-      const pendingReason = !hasWallet && !hasChannel
-        ? 'Missing TON Wallet and Channel Join'
-        : (!hasWallet ? 'Missing TON Wallet' : 'Missing Channel Join');
+    // RULE 2: MISSING OFFICIAL CHANNEL OR FEWER THAN 3 TASKS COMPLETED -> STRICTLY PENDING ACTION
+    if (!requirementsCompleted) {
+      const pendingReason = !hasChannel && !hasThreeTasks
+        ? 'Channel join and 3 tasks required'
+        : (!hasChannel ? 'Missing Channel Join' : `Complete 3 tasks to qualify (${completedTasksCount}/3)`);
 
       // Sync PENDING status to MongoDB ReferralLogModel
       if (isMongoConnected()) {
@@ -401,9 +409,11 @@ export async function verifyReferralStatus(params: {
         targetItem.isQualified = false;
         targetItem.hasWallet = hasWallet;
         targetItem.hasChannel = hasChannel;
+        targetItem.tasksCompleted = completedTasksCount;
+        targetItem.completedTasksCount = completedTasksCount;
         targetItem.bonusAwardedPOP = 0;
         targetItem.referralBonusClaimed = false;
-        targetItem.disqualifiedReason = undefined;
+        targetItem.disqualifiedReason = pendingReason;
       }
 
       return {
@@ -419,7 +429,7 @@ export async function verifyReferralStatus(params: {
       };
     }
 
-    // RULE 3: WALLET CONNECTED + CHANNEL JOINED + UNIQUE IP/DEVICE -> QUALIFIED
+    // RULE 3: CHANNEL JOINED + AT LEAST 3 TASKS COMPLETED + UNIQUE ACCOUNT / IP -> QUALIFIED
     const adminSettings = await getActiveAdminReferralSettings();
     const dynamicBonus = adminSettings.referralBonus;
 
@@ -476,7 +486,7 @@ export async function verifyReferralStatus(params: {
             qualified_at: now,
             has_wallet: true,
             has_channel: true,
-            reason: 'TON Wallet, Channel & Unique Device verified',
+            reason: 'Channel joined, 3 tasks completed & unique ID verified',
             updated_at: now,
           },
         },

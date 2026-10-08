@@ -397,7 +397,9 @@ export const SquadController = {
             mReason.includes('flagged')
           ))
         );
-        const isQual = !isUnqual && hasWallet && hasChannel;
+        const mTasksCount = Number(mItem.tasksCompleted ?? mItem.completedTasksCount ?? (mItem as any).tasks_count ?? 0);
+        const mHasThreeTasks = mTasksCount >= 3;
+        const isQual = !isUnqual && (String(mItem.status || '').toUpperCase() === 'QUALIFIED' || (hasChannel && mHasThreeTasks));
 
         let normalizedStatus: 'PENDING' | 'QUALIFIED' | 'UNQUALIFIED' = 'PENDING';
         if (isUnqual) normalizedStatus = 'UNQUALIFIED';
@@ -418,6 +420,8 @@ export const SquadController = {
           existing.isMultiAccount = isUnqual;
           existing.hasWallet = hasWallet;
           existing.hasChannel = hasChannel;
+          existing.tasksCompleted = mTasksCount;
+          existing.completedTasksCount = mTasksCount;
           if (isQual) {
             existing.bonusAwardedPOP = Number(existing.bonusAwardedPOP) || 0;
           } else {
@@ -435,6 +439,8 @@ export const SquadController = {
             isQualified: isQual,
             hasWallet,
             hasChannel,
+            tasksCompleted: mTasksCount,
+            completedTasksCount: mTasksCount,
             hasMined: Boolean(mItem.hasMined),
             isMultiAccount: isUnqual,
             bonusAwardedPOP: isQual ? (Number(mItem.bonusAwardedPOP) || 0) : 0,
@@ -476,7 +482,9 @@ export const SquadController = {
             rReason.includes('flagged')
           ))
         );
-        const isQual = !isUnqual && hasWallet && hasChannel;
+        const rTasksCount = Number(r.tasksCompleted ?? r.completedTasksCount ?? (r as any).tasks_count ?? 0);
+        const rHasThreeTasks = rTasksCount >= 3;
+        const isQual = !isUnqual && (s === 'QUALIFIED' || (hasChannel && rHasThreeTasks));
 
         let status: 'PENDING' | 'QUALIFIED' | 'UNQUALIFIED' = 'PENDING';
         if (isUnqual) status = 'UNQUALIFIED';
@@ -495,6 +503,8 @@ export const SquadController = {
           isMultiAccount: isUnqual,
           hasWallet,
           hasChannel,
+          tasksCompleted: rTasksCount,
+          completedTasksCount: rTasksCount,
           bonusAwardedPOP: isQual ? (Number(r.bonusAwardedPOP) || 0) : 0,
         };
       }).sort(

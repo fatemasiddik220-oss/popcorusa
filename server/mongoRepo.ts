@@ -199,12 +199,13 @@ export async function findUserByReferralCodeInMongo(code: string): Promise<User 
 }
 
 /**
- * Verifies referral qualification when user completes wallet & channel requirements
+ * Verifies referral qualification when user completes channel & 3 tasks requirements
  */
 export async function verifyAndQualifyReferralInMongo(params: {
   referredTelegramId: string;
-  hasWallet: boolean;
+  hasWallet?: boolean;
   hasChannel: boolean;
+  tasksCompleted?: number;
   bonusAmount: number;
 }): Promise<{
   success: boolean;
@@ -224,17 +225,23 @@ export async function verifyAndQualifyReferralInMongo(params: {
     }
 
     // Update requirements state
-    log.has_wallet = params.hasWallet;
-    log.has_channel = params.hasChannel;
+    log.has_wallet = Boolean(params.hasWallet);
+    log.has_channel = Boolean(params.hasChannel);
 
-    // Check if requirements are met
-    if (!params.hasWallet || !params.hasChannel) {
+    const tasksCount = typeof params.tasksCompleted === 'number'
+      ? params.tasksCompleted
+      : Number((log as any).tasks_completed ?? 0);
+
+    // Check if requirements are met: channel joined AND at least 3 tasks completed
+    if (!params.hasChannel || tasksCount < 3) {
       log.status = 'PENDING';
       await log.save();
       return {
         success: true,
         status: 'PENDING',
-        reason: 'Waiting for TON Wallet and Channel Join',
+        reason: !params.hasChannel && tasksCount < 3
+          ? 'Waiting for Official Channel Join and 3 Tasks Completed'
+          : (!params.hasChannel ? 'Waiting for Official Channel Join' : `Complete 3 tasks (${tasksCount}/3)`),
         awardedBonus: 0,
         referrerTelegramId: log.referrer_id,
       };
@@ -289,7 +296,7 @@ export async function verifyAndQualifyReferralInMongo(params: {
     log.referral_bonus_claimed = true;
     log.bonus_awarded = params.bonusAmount;
     log.qualified_at = new Date();
-    log.reason = 'TON Wallet and Channel verified';
+    log.reason = 'Official channel joined and 3 tasks completed';
     await log.save();
 
     // Credit dynamic bonus points to the inviter in MongoDB Atlas
@@ -555,8 +562,10 @@ export async function getMyReferralsFromMongo(identifier: {
 
       const hasWallet = Boolean((u.wallet_address && String(u.wallet_address).trim() !== '') || (u as any).tonWalletAddress || (u as any).walletAddress);
       const hasChannel = Boolean(u.joined_channel || (u as any).hasJoinedChannel || (u.completed_tasks && u.completed_tasks.includes('task-tg-channel')));
+      const completedTasksCount = Array.isArray(u.completed_tasks) ? u.completed_tasks.length : 0;
+      const hasThreeTasks = completedTasksCount >= 3;
       const isUnqual = Boolean(u.is_flagged);
-      const isQual = !isUnqual && hasWallet && hasChannel;
+      const isQual = !isUnqual && hasChannel && hasThreeTasks;
       const status: 'PENDING' | 'QUALIFIED' | 'UNQUALIFIED' = isUnqual ? 'UNQUALIFIED' : (isQual ? 'QUALIFIED' : 'PENDING');
 
       referralMap.set(tgId, {
@@ -570,6 +579,8 @@ export async function getMyReferralsFromMongo(identifier: {
         isQualified: isQual,
         hasWallet,
         hasChannel,
+        tasksCompleted: completedTasksCount,
+        completedTasksCount,
         hasMined: true,
         isMultiAccount: isUnqual,
         bonusAwardedPOP: 0,
@@ -594,6 +605,8 @@ export async function getMyReferralsFromMongo(identifier: {
         (log.has_channel !== undefined && log.has_channel !== null ? Boolean(log.has_channel) : false) ||
         Boolean(existing?.hasChannel)
       );
+      const completedTasksCount = Number(existing?.completedTasksCount ?? (log as any).tasks_completed ?? (log as any).tasks_count ?? 0);
+      const hasThreeTasks = completedTasksCount >= 3;
 
       const logReason = (log.reason || '').toLowerCase();
       const existReason = (existing?.disqualifiedReason || '').toLowerCase();
@@ -617,8 +630,8 @@ export async function getMyReferralsFromMongo(identifier: {
           existReason.includes('multi-account')
         ));
       
-      // Fully evaluate completion flags: if both tasks are completed and not flagged/unqualified, user is QUALIFIED!
-      const isQual = !isUnqual && hasWallet && hasChannel;
+      // Fully evaluate completion flags: if official channel + at least 3 tasks completed and not flagged, user is QUALIFIED!
+      const isQual = !isUnqual && (logStatusUpper === 'QUALIFIED' || (hasChannel && hasThreeTasks));
 
       let normalizedStatus: 'PENDING' | 'QUALIFIED' | 'UNQUALIFIED' = 'PENDING';
       if (isUnqual) normalizedStatus = 'UNQUALIFIED';
@@ -634,6 +647,8 @@ export async function getMyReferralsFromMongo(identifier: {
         existing.isMultiAccount = isUnqual;
         existing.hasWallet = hasWallet;
         existing.hasChannel = hasChannel;
+        existing.tasksCompleted = completedTasksCount;
+        existing.completedTasksCount = completedTasksCount;
         existing.bonusAwardedPOP = earnedBonus;
         if (log.referred_username && (!existing.username || existing.username.startsWith('user_'))) {
           existing.username = log.referred_username;
@@ -655,6 +670,8 @@ export async function getMyReferralsFromMongo(identifier: {
           isQualified: isQual,
           hasWallet,
           hasChannel,
+          tasksCompleted: completedTasksCount,
+          completedTasksCount,
           hasMined: true,
           isMultiAccount: isUnqual,
           bonusAwardedPOP: earnedBonus,
@@ -671,12 +688,11 @@ export async function getMyReferralsFromMongo(identifier: {
           {
             $set: {
               status: 'QUALIFIED',
-              has_wallet: true,
               has_channel: true,
               bonus_awarded: earnedBonus,
               referral_bonus_claimed: true,
               qualified_at: new Date(),
-              reason: 'TON Wallet and Channel verified',
+              reason: 'Official channel joined and 3 tasks completed',
             }
           }
         ).catch(() => {});
@@ -822,7 +838,7 @@ export function getWeeklyCycleBounds(now: Date = new Date()): { startOfCycle: Da
 
 /**
  * Automatically syncs and reconciles qualified referrals from UserModel into ReferralLogModel.
- * Ensures any referred user who completed wallet connection and channel join is marked QUALIFIED
+ * Ensures any referred user who joined the channel and completed at least 3 tasks is marked QUALIFIED
  * in ReferralLogModel, and circular parent-child logs are removed, ensuring 100% synchronization
  * between Squad breakdown and Weekly Leaderboard.
  */
@@ -831,8 +847,8 @@ export async function autoReconcileReferralsInMongo(): Promise<void> {
   try {
     const verifiedUsers = await UserModel.find({
       referred_by: { $exists: true, $ne: null },
-      wallet_address: { $exists: true, $ne: null },
       joined_channel: true,
+      $expr: { $gte: [{ $size: { $ifNull: ['$completed_tasks', []] } }, 3] },
       is_flagged: { $ne: true },
     }).lean();
 
@@ -855,10 +871,10 @@ export async function autoReconcileReferralsInMongo(): Promise<void> {
             referred_id: tgId,
             referred_username: u.username || `user_${tgId.slice(-4)}`,
             referred_first_name: u.first_name || u.username || 'POP Miner',
-            has_wallet: true,
+            has_wallet: Boolean(u.wallet_address),
             has_channel: true,
             status: 'QUALIFIED',
-            reason: 'TON Wallet and Channel verified',
+            reason: 'Official channel joined and 3 tasks completed',
             qualified_at: u.updated_at || u.created_at || new Date(),
           },
           $setOnInsert: {

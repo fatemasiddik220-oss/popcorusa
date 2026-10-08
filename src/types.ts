@@ -105,6 +105,8 @@ export interface ReferralUserItem {
   hasChannel: boolean;
   hasWallet: boolean;
   hasMined: boolean;
+  tasksCompleted?: number;
+  completedTasksCount?: number;
   isMultiAccount: boolean;
   status?: ReferralStatus;
   disqualifiedReason?: string;

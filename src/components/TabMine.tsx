@@ -83,11 +83,11 @@ export const TabMine: React.FC<TabMineProps> = ({
   const hasWallet = !!user.tonWalletAddress;
   const hasChannel = !!user.hasJoinedChannel;
   const hasStarted = !!user.hasStartedMining;
-  const isFullyUnlocked = hasWallet && hasChannel;
+  const isFullyUnlocked = hasChannel;
 
-  // Automatically trigger mining start once user connects TON Wallet AND joins Telegram channel
+  // Automatically trigger mining start once user joins Telegram channel
   useEffect(() => {
-    if (hasWallet && hasChannel && !hasStarted && !isStarting) {
+    if (hasChannel && !hasStarted && !isStarting) {
       setIsStarting(true);
       onStartMining()
         .then(() => {
@@ -105,16 +105,16 @@ export const TabMine: React.FC<TabMineProps> = ({
           setIsStarting(false);
         });
     }
-  }, [hasWallet, hasChannel, hasStarted, isStarting, onStartMining]);
+  }, [hasChannel, hasStarted, isStarting, onStartMining]);
 
   // Format POP and USD calculation (100 POP = $0.10 USDT at rate 0.001)
   const totalBalanceUSD = (user.balancePOP * config.popUsdRate).toFixed(2);
   const unclaimedUSD = (liveUnclaimed * config.popUsdRate).toFixed(4);
 
   const handleClaimClick = async () => {
-    if (!user.tonWalletAddress) {
+    if (!user.hasJoinedChannel) {
       haptic.warning();
-      onOpenWalletModal();
+      onOpenChannelModal();
       return;
     }
 
@@ -383,20 +383,8 @@ export const TabMine: React.FC<TabMineProps> = ({
         </button>
 
         {/* Direct Action Button: Auto-handled Prerequisites -> Claim Reward */}
-        {!hasWallet ? (
-          /* Step 1: Connect Wallet */
-          <button
-            onClick={() => {
-              haptic.impact('medium');
-              onOpenWalletModal();
-            }}
-            className="py-3 px-3.5 rounded-2xl bg-gradient-to-r from-[#FFE600] to-yellow-400 hover:from-yellow-300 hover:to-yellow-500 text-black font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-yellow-500/25 font-display tracking-tight"
-          >
-            <Wallet className="w-4 h-4" />
-            <span className="truncate">Connect Wallet</span>
-          </button>
-        ) : !hasChannel ? (
-          /* Step 2: Join Channel */
+        {!hasChannel ? (
+          /* Join Channel button replaces previously shown Connect Wallet button */
           <button
             onClick={() => {
               haptic.impact('medium');
@@ -408,7 +396,7 @@ export const TabMine: React.FC<TabMineProps> = ({
             <span className="truncate">Join Channel</span>
           </button>
         ) : (
-          /* Fully Unlocked & Auto-Mining: Claim Reward */
+          /* Channel Joined & Verified: Claim Reward */
           <button
             onClick={handleClaimClick}
             disabled={isClaiming || liveUnclaimed < 0.000001}
@@ -424,22 +412,20 @@ export const TabMine: React.FC<TabMineProps> = ({
         )}
       </div>
 
-      {/* 4. SLEEK ONBOARDING PROGRESS STRIP (Only shown if wallet or channel is incomplete) */}
+      {/* 4. SLEEK ONBOARDING PROGRESS STRIP (Only shown if channel join is incomplete) */}
       {!isFullyUnlocked && (
         <div className="p-2.5 bg-[#121824]/90 rounded-2xl border border-[#252D3D] flex items-center justify-between text-xs">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shrink-0" />
             <span className="text-[11px] text-gray-300 font-medium">
-              {!hasWallet
-                ? 'Connect TON Wallet to start earning'
-                : 'Join official channel to activate auto-mining'}
+              Join official channel to activate and claim mining rewards
             </span>
           </div>
           <button
-            onClick={!hasWallet ? onOpenWalletModal : onOpenChannelModal}
-            className="text-[10px] font-bold text-[#FFE600] uppercase hover:underline shrink-0 ml-2"
+            onClick={onOpenChannelModal}
+            className="text-[10px] font-bold text-[#00E5FF] uppercase hover:underline shrink-0 ml-2"
           >
-            {!hasWallet ? 'Connect →' : 'Join →'}
+            Join →
           </button>
         </div>
       )}

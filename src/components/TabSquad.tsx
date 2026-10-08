@@ -170,9 +170,9 @@ export const TabSquad: React.FC<TabSquadProps> = ({
   }, [referrals]);
 
   // Helper to strictly categorize referral status matching backend database rules:
-  // - PENDING ACTION: user has NOT connected TON Wallet OR NOT joined TG Channel -> PENDING
-  // - UNQUALIFIED: same IP / device / multi-account detected -> UNQUALIFIED
-  // - QUALIFIED: TON Wallet connected = TRUE AND TG Channel joined = TRUE AND Unique IP = TRUE -> QUALIFIED
+  // - PENDING ACTION: user has NOT joined TG Channel OR NOT completed 3 tasks -> PENDING
+  // - UNQUALIFIED: same IP / device / multi-account / self-referral -> UNQUALIFIED
+  // - QUALIFIED: TG Channel joined = TRUE AND Completed Tasks >= 3 AND Unique User ID (Anti-Sybil) = TRUE -> QUALIFIED
   const getReferralStatus = React.useCallback((r: ReferralUserItem): 'PENDING' | 'QUALIFIED' | 'UNQUALIFIED' => {
     const s = String(r.status || '').toUpperCase();
     const isUnqual = Boolean(
@@ -192,13 +192,8 @@ export const TabSquad: React.FC<TabSquadProps> = ({
     );
     if (isUnqual) return 'UNQUALIFIED';
 
-    const hasWallet = Boolean(
-      r.hasWallet || 
-      (r as any).has_wallet || 
-      (r as any).wallet_address || 
-      (r as any).walletAddress || 
-      (r as any).tonWalletAddress
-    );
+    const tasksCount = Number(r.tasksCompleted ?? r.completedTasksCount ?? (r as any).tasks_count ?? 0);
+    const hasThreeTasks = tasksCount >= 3;
     const hasChannel = Boolean(
       r.hasChannel || 
       (r as any).has_channel || 
@@ -206,9 +201,8 @@ export const TabSquad: React.FC<TabSquadProps> = ({
       (r as any).hasJoinedChannel
     );
 
-    // Rule: If both tasks (TON Wallet + Channel Join) are completed, user is strictly QUALIFIED!
-    if (hasWallet && hasChannel) return 'QUALIFIED';
-    if (s === 'QUALIFIED' || r.isQualified === true) return 'QUALIFIED';
+    // Rule: If channel is joined and at least 3 tasks completed, user is strictly QUALIFIED!
+    if (s === 'QUALIFIED' || r.isQualified === true || (hasChannel && hasThreeTasks)) return 'QUALIFIED';
 
     return 'PENDING';
   }, []);
@@ -430,7 +424,7 @@ export const TabSquad: React.FC<TabSquadProps> = ({
               {pendingCount}
             </div>
             <span className="text-[10px] text-amber-400/80 block mt-0.5">
-              Missing Wallet / Channel
+              Waiting: Channel / 3 Tasks
             </span>
           </div>
 
@@ -692,7 +686,7 @@ export const TabSquad: React.FC<TabSquadProps> = ({
             </span>
           </div>
           <div className="text-[10px] text-gray-400 flex items-center gap-1">
-            <span>* Qualified criteria: TON Wallet Connected + Official Channel Joined + Mining Started.</span>
+            <span>* Qualified criteria: Official Channel Joined + at least 3 Tasks Completed + Unique User ID (Anti-Sybil).</span>
           </div>
         </div>
 
@@ -1027,7 +1021,7 @@ export const TabSquad: React.FC<TabSquadProps> = ({
               <Users2 className="w-8 h-8 text-gray-500 mx-auto" />
               <h4 className="text-xs font-bold text-white">No referrals yet</h4>
               <p className="text-[11px] text-gray-400 max-w-xs mx-auto">
-                Share your invite link with friends! When they connect their TON wallet & join our channel on a separate device, you instantly earn +{referralBonus} POP and {commissionRate}% mining commission.
+                Share your invite link with friends! When they join our channel and complete at least 3 tasks on a separate device, you instantly earn +{referralBonus} POP and {commissionRate}% mining commission.
               </p>
               <button
                 onClick={handleShareTelegram}
@@ -1066,9 +1060,12 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                   (ref as any).hasJoinedChannel
                 );
 
+                const tasksCount = Number(ref.tasksCompleted ?? ref.completedTasksCount ?? (ref as any).tasks_count ?? 0);
+                const hasThreeTasks = tasksCount >= 3;
+
                 const pendingRequirements: string[] = [];
-                if (!hasWallet) pendingRequirements.push('Connect TON Wallet');
                 if (!hasChannel) pendingRequirements.push('Join Official Channel');
+                if (!hasThreeTasks) pendingRequirements.push(`Complete 3 Tasks (${tasksCount}/3)`);
 
                 const displayName = ref.username
                   ? `@${ref.username}`
@@ -1180,25 +1177,13 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                         {isPending && (
                           <p className="text-[10px] text-amber-300/90 mt-1.5 flex items-center gap-1.5">
                             <Clock className="w-3 h-3 text-amber-400 shrink-0" />
-                            <span>Joined via invite link. Waiting for referee to complete: <strong className="text-white">{pendingRequirements.join(' + ') || 'Wallet / Channel'}</strong>.</span>
+                            <span>Joined via invite link. Waiting for referee to complete: <strong className="text-white">{pendingRequirements.join(' + ') || 'Channel / 3 Tasks'}</strong>.</span>
                           </p>
                         )}
                       </div>
 
                       {/* 3 Qualification Verification Checkpoints */}
                       <div className="flex flex-col items-end gap-1 shrink-0 pt-0.5">
-                        <span
-                          title={hasWallet ? 'TON Wallet Connected' : 'TON Wallet Pending'}
-                          className={`px-2 py-0.5 rounded-lg text-[9px] font-mono-digits flex items-center gap-1 ${
-                            hasWallet
-                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold'
-                              : 'bg-gray-800/80 text-gray-400 border border-gray-700'
-                          }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${hasWallet ? 'bg-emerald-400' : 'bg-gray-500'}`} />
-                          TON Wallet
-                        </span>
-
                         <span
                           title={hasChannel ? 'TG Channel Joined' : 'TG Channel Pending'}
                           className={`px-2 py-0.5 rounded-lg text-[9px] font-mono-digits flex items-center gap-1 ${
@@ -1212,7 +1197,19 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                         </span>
 
                         <span
-                          title={!isSameIp ? 'Unique Device Hardware / IP' : 'Same IP / Device Match'}
+                          title={hasThreeTasks ? '3 Tasks Completed' : `${tasksCount}/3 Tasks Completed`}
+                          className={`px-2 py-0.5 rounded-lg text-[9px] font-mono-digits flex items-center gap-1 ${
+                            hasThreeTasks
+                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold'
+                              : 'bg-gray-800/80 text-gray-400 border border-gray-700'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${hasThreeTasks ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+                          {hasThreeTasks ? '3 Tasks Done' : `${tasksCount}/3 Tasks`}
+                        </span>
+
+                        <span
+                          title={!isSameIp ? 'Unique Device Hardware & User ID' : 'Same IP / Device Match'}
                           className={`px-2 py-0.5 rounded-lg text-[9px] font-mono-digits flex items-center gap-1 ${
                             !isSameIp
                               ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold'
@@ -1220,7 +1217,7 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                           }`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${!isSameIp ? 'bg-emerald-400' : 'bg-red-500'}`} />
-                          {!isSameIp ? 'Unique IP' : 'Same IP'}
+                          {!isSameIp ? 'Unique ID & IP' : 'Same IP'}
                         </span>
                       </div>
                     </div>
@@ -1269,25 +1266,25 @@ export const TabSquad: React.FC<TabSquadProps> = ({
             {/* 3 Step Breakdown */}
             <div className="space-y-2">
               <div className="p-3 rounded-2xl bg-[#0B0E14] border border-[#1E2638] flex items-start gap-3">
-                <span className="w-6 h-6 rounded-xl bg-[#00E5FF]/20 text-[#00E5FF] flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
+                <span className="w-6 h-6 rounded-xl bg-[#0088CC]/20 text-[#0088CC] flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
                   1
                 </span>
                 <div>
-                  <span className="text-white font-bold block text-xs">Connect TON Wallet</span>
+                  <span className="text-white font-bold block text-xs">Join Official TG Channel</span>
                   <span className="text-[11px] text-gray-400 leading-tight block mt-0.5">
-                    Verifies legitimate decentralized on-chain identity and enables instant payouts.
+                    Must be subscribed to the official community Telegram channel.
                   </span>
                 </div>
               </div>
 
               <div className="p-3 rounded-2xl bg-[#0B0E14] border border-[#1E2638] flex items-start gap-3">
-                <span className="w-6 h-6 rounded-xl bg-[#0088CC]/20 text-[#0088CC] flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
+                <span className="w-6 h-6 rounded-xl bg-[#00E5FF]/20 text-[#00E5FF] flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
                   2
                 </span>
                 <div>
-                  <span className="text-white font-bold block text-xs">Join Official TG Channel</span>
+                  <span className="text-white font-bold block text-xs">Complete at Least 3 Tasks</span>
                   <span className="text-[11px] text-gray-400 leading-tight block mt-0.5">
-                    Must be subscribed to the official community telegram channel.
+                    Must successfully complete at least 3 ecosystem tasks to verify real engagement.
                   </span>
                 </div>
               </div>
@@ -1297,9 +1294,9 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                   3
                 </span>
                 <div>
-                  <span className="text-white font-bold block text-xs">Different Device & Unique IP</span>
+                  <span className="text-white font-bold block text-xs">Unique User ID (Anti-Sybil Check)</span>
                   <span className="text-[11px] text-gray-400 leading-tight block mt-0.5">
-                    Separate physical hardware & unique IP address (No multi-accounts or self-referrals).
+                    Maintaining a unique user ID, distinct device hardware & separate IP (No self-referrals or multi-accounts).
                   </span>
                 </div>
               </div>
@@ -1319,7 +1316,7 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                   <strong className="text-[#00E5FF]">{commissionRate}% Lifetime Squad Commission:</strong> Distributed on every mining claim made by qualified referrals ({commissionRate}% × mined POP).
                 </li>
                 <li>
-                  <strong className="text-amber-300">Pending Action:</strong> Users who joined via link but haven't connected wallet or joined channel generate 0 POP until qualified.
+                  <strong className="text-amber-300">Pending Action:</strong> Users who joined via link but haven't joined the official channel or completed 3 tasks generate 0 POP until qualified.
                 </li>
               </ul>
             </div>

@@ -362,9 +362,9 @@ export function App() {
   }, [user?.id, user?.telegramId, config?.adProvider, config?.adsgramInitialDelayMinutes, config?.adsgramStartupDailyLimit, config?.monetagInitialDelayMinutes, config?.monetagStartupDailyLimit]);
 
   // Handlers for App Actions
-  // Automatically trigger mining start once a user connects TON Wallet AND joins official Telegram channel
+  // Automatically trigger mining start once a user joins official Telegram channel
   useEffect(() => {
-    if (user && user.tonWalletAddress && user.hasJoinedChannel && !user.hasStartedMining) {
+    if (user && user.hasJoinedChannel && !user.hasStartedMining) {
       api.startMining()
         .then((updated) => {
           setUser(updated);
@@ -373,7 +373,7 @@ export function App() {
           console.warn('Auto-start mining error:', err);
         });
     }
-  }, [user?.tonWalletAddress, user?.hasJoinedChannel, user?.hasStartedMining]);
+  }, [user?.hasJoinedChannel, user?.hasStartedMining]);
 
   // Dynamic Claim Mining Reward handler:
   // - Fixed 2-hour cooldown is COMPLETELY REMOVED.

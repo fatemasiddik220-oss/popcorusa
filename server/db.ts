@@ -992,8 +992,8 @@ class DatabaseEngine {
     userTasks.add('task-tg-channel');
     this.completedTasks.set(user.id, userTasks);
 
-    // Auto-start mining if both TON wallet is connected and official channel is joined
-    if (user.tonWalletAddress && user.hasJoinedChannel && !user.hasStartedMining) {
+    // Auto-start mining if official channel is joined
+    if (user.hasJoinedChannel && !user.hasStartedMining) {
       const now = new Date().toISOString();
       user.hasStartedMining = true;
       user.miningStartedAt = now;
@@ -1008,14 +1008,11 @@ class DatabaseEngine {
     return user;
   }
 
-  // Start Mining (Strictly Mandates Wallet Connection & Channel Membership)
+  // Start Mining (Mandates Channel Membership - wallet no longer required)
   public startMining(telegramId: string): User {
     const user = this.getUser(telegramId);
     if (!user) throw new Error('User not found');
 
-    if (!user.tonWalletAddress) {
-      throw new Error('WALLET_REQUIRED: Users MUST connect a TON-compatible wallet before starting mining.');
-    }
     if (!user.hasJoinedChannel) {
       throw new Error('CHANNEL_REQUIRED: Users MUST join the official Telegram Channel before starting mining.');
     }
@@ -1032,10 +1029,21 @@ class DatabaseEngine {
     return user;
   }
 
+  public getCompletedTasksCount(userIdOrTelegramId: string): number {
+    const user = this.getUser(userIdOrTelegramId);
+    if (!user) return 0;
+    const completedArr = user.completedTasks || [];
+    const completedSet = this.completedTasks.get(user.id) || new Set();
+    const all = new Set([...completedSet, ...completedArr]);
+    return all.size;
+  }
+
   // Check and apply referral qualification rule
-  // Rule: Qualified ONLY after completing BOTH:
-  // 1. TON Wallet Connection
-  // 2. Joining the Official Telegram Channel
+  // New Rule:
+  // 1. Official Channel joined
+  // 2. Successfully complete at least 3 tasks
+  // 3. Unique user ID & anti-sybil (different device & IP, no self-referrals)
+  // Wallet connection is NO LONGER required for qualification.
   public checkAndApplyReferralQualification(user: User): void {
     const hasJoinedChannel = Boolean(
       user.hasJoinedChannel ||
@@ -1048,7 +1056,10 @@ class DatabaseEngine {
       (user as any).walletAddress
     );
     const hasMined = Boolean(user.hasStartedMining || user.totalMined > 0);
-    const bothStepsCompleted = hasJoinedChannel && hasWallet;
+
+    const completedTasksCount = this.getCompletedTasksCount(user.id);
+    const hasThreeTasks = completedTasksCount >= 3;
+    const requirementsCompleted = hasJoinedChannel && hasThreeTasks;
 
     if (user.referrerId) {
       const inviter = this.getUserByReferralCode(user.referrerId) || 
@@ -1073,6 +1084,8 @@ class DatabaseEngine {
             hasChannel: hasJoinedChannel,
             hasWallet: hasWallet,
             hasMined: hasMined,
+            tasksCompleted: completedTasksCount,
+            completedTasksCount: completedTasksCount,
             isMultiAccount: false,
             status: 'Pending' as any,
             bonusAwardedPOP: 0,
@@ -1084,6 +1097,8 @@ class DatabaseEngine {
         target.hasChannel = hasJoinedChannel;
         target.hasWallet = hasWallet;
         target.hasMined = hasMined;
+        target.tasksCompleted = completedTasksCount;
+        target.completedTasksCount = completedTasksCount;
 
         // Strict Unique IP and Device verification
         const sameIp = Boolean(
@@ -1101,7 +1116,7 @@ class DatabaseEngine {
         const isFraudOrSameIp = sameIp || sameDevice || isSelf || isFlagged;
 
         if (isFraudOrSameIp) {
-          // 1. UNQUALIFIED: Same IP / Device Match -> UNQUALIFIED
+          // 1. UNQUALIFIED: Same IP / Device Match or Self-Referral -> UNQUALIFIED
           const reason = sameIp && sameDevice
             ? 'Same IP and Device ID detected'
             : sameIp
@@ -1123,25 +1138,31 @@ class DatabaseEngine {
             referredTelegramId: user.telegramId,
             hasWallet: hasWallet,
             hasChannel: hasJoinedChannel,
+            tasksCompleted: completedTasksCount,
             bonusAmount: 0,
           }).catch(err => console.warn('[Mongo] verifyAndQualifyReferralInMongo error:', err));
-        } else if (!bothStepsCompleted) {
-          // 2. PENDING ACTION: Missing TON Wallet OR missing Channel -> PENDING
+        } else if (!requirementsCompleted) {
+          // 2. PENDING ACTION: Missing Channel OR less than 3 tasks completed -> PENDING
+          const pendingReason = !hasJoinedChannel && !hasThreeTasks
+            ? 'Channel join and 3 tasks required'
+            : (!hasJoinedChannel ? 'Channel join required' : `Complete 3 tasks (${completedTasksCount}/3)`);
+
           user.isQualified = false;
           target.isQualified = false;
           target.status = 'PENDING' as any;
           target.bonusAwardedPOP = 0;
           target.referralBonusClaimed = false;
-          target.disqualifiedReason = undefined;
+          target.disqualifiedReason = pendingReason;
 
           verifyAndQualifyReferralInMongo({
             referredTelegramId: user.telegramId,
             hasWallet: hasWallet,
             hasChannel: hasJoinedChannel,
+            tasksCompleted: completedTasksCount,
             bonusAmount: 0,
           }).catch(err => console.warn('[Mongo] verifyAndQualifyReferralInMongo error:', err));
         } else {
-          // 3. QUALIFIED: Wallet + Channel + Unique IP -> QUALIFIED
+          // 3. QUALIFIED: Channel + at least 3 Tasks + Unique IP & Account -> QUALIFIED
           user.isQualified = true;
           target.isQualified = true;
           target.isMultiAccount = false;
@@ -1191,8 +1212,9 @@ class DatabaseEngine {
             // Sync qualification and single bonus reward to MongoDB Atlas
             verifyAndQualifyReferralInMongo({
               referredTelegramId: user.telegramId,
-              hasWallet: true,
+              hasWallet: hasWallet,
               hasChannel: true,
+              tasksCompleted: completedTasksCount,
               bonusAmount: dynamicBonus,
             }).catch(err => console.warn('[Mongo] verifyAndQualifyReferralInMongo error:', err));
           }
@@ -1205,17 +1227,12 @@ class DatabaseEngine {
     }
   }
 
-  // Claim Mining Reward (MANDATORY WALLET & CHANNEL REQUIREMENT)
+  // Claim Mining Reward (Channel Membership Required, Wallet NOT required to claim)
   public claimMiningReward(telegramId: string): { user: User; claimedAmount: number } {
     const user = this.getUser(telegramId);
     if (!user) throw new Error('User not found');
 
-    // Mandate 1: Wallet must be connected!
-    if (!user.tonWalletAddress) {
-      throw new Error('WALLET_REQUIRED: Users MUST connect a TON-compatible wallet before claiming rewards.');
-    }
-
-    // Mandate 2: Official Telegram Channel must be joined!
+    // Official Telegram Channel must be joined!
     if (!user.hasJoinedChannel) {
       throw new Error('CHANNEL_REQUIRED: Users MUST join the official Telegram Channel before claiming rewards.');
     }
@@ -1291,14 +1308,13 @@ class DatabaseEngine {
     return { user, claimedAmount: amountToClaim };
   }
 
-  // Claim Squad Referral Commission
+  // Claim Squad Referral Commission (Channel Membership required, Wallet not required to claim)
   public claimSquadCommission(telegramId: string): { user: User; claimedCommission: number } {
     const user = this.getUser(telegramId);
     if (!user) throw new Error('User not found');
 
-    // Mandate: Wallet must be connected!
-    if (!user.tonWalletAddress) {
-      throw new Error('WALLET_REQUIRED: Users MUST connect a TON-compatible wallet before claiming squad commissions.');
+    if (!user.hasJoinedChannel) {
+      throw new Error('CHANNEL_REQUIRED: Users MUST join the official Telegram Channel before claiming squad commissions.');
     }
 
     const commission = user.unclaimedSquadPOP;
@@ -1573,11 +1589,13 @@ class DatabaseEngine {
 
     user.balancePOP = parseFloat((user.balancePOP + task.rewardPOP).toFixed(4));
 
-    // If channel task, check qualification
+    // If channel task, mark channel joined
     if (taskId === 'task-tg-channel' || task.category === 'telegram') {
       user.hasJoinedChannel = true;
-      this.checkAndApplyReferralQualification(user);
     }
+
+    // Always check referral qualification on any task completion (referred user requires 3 tasks + channel)
+    this.checkAndApplyReferralQualification(user);
 
     this.logTransaction({
       userId: user.id,
@@ -1916,20 +1934,24 @@ class DatabaseEngine {
         (ref as any).status === 'UNQUALIFIED'
       );
 
-      const isBothDone = hasWallet && hasChannel;
+      const completedTasksCount = u
+        ? this.getCompletedTasksCount(u.id)
+        : Number((ref as any).completedTasksCount ?? (ref as any).tasksCompleted ?? 0);
+      const hasThreeTasks = completedTasksCount >= 3;
+      const isBothDone = hasChannel && hasThreeTasks;
       let finalStatus: 'PENDING' | 'QUALIFIED' | 'UNQUALIFIED' = 'PENDING';
       let isQual = false;
 
-      if (!isBothDone) {
-        // STRICT REQUIREMENT 1: Missing TON Wallet OR missing Channel -> PENDING
-        finalStatus = 'PENDING';
-        isQual = false;
-      } else if (isSameIpMatch) {
-        // STRICT REQUIREMENT 1: Same IP / Device Match -> UNQUALIFIED
+      if (isSameIpMatch) {
+        // STRICT REQUIREMENT 1: Same IP / Device Match or Self-Referral -> UNQUALIFIED
         finalStatus = 'UNQUALIFIED';
         isQual = false;
+      } else if (!isBothDone) {
+        // STRICT REQUIREMENT 2: Missing Channel OR fewer than 3 completed tasks -> PENDING
+        finalStatus = 'PENDING';
+        isQual = false;
       } else {
-        // STRICT REQUIREMENT 1: Wallet + Channel + Unique IP -> QUALIFIED
+        // STRICT REQUIREMENT 3: Channel + at least 3 Tasks + Unique Account -> QUALIFIED
         finalStatus = 'QUALIFIED';
         isQual = true;
       }
@@ -1945,12 +1967,20 @@ class DatabaseEngine {
         hasWallet,
         hasChannel,
         hasMined,
+        tasksCompleted: completedTasksCount,
+        completedTasksCount,
         isMultiAccount: isSameIpMatch,
         isQualified: isQual,
         status: finalStatus as any,
         bonusAwardedPOP: isQual ? (Number(ref.bonusAwardedPOP) || 0) : 0,
         referralBonusClaimed: isQual ? (ref.referralBonusClaimed ?? (ref.bonusAwardedPOP > 0)) : false,
-        disqualifiedReason: isSameIpMatch ? (ref.disqualifiedReason || 'Same IP or Device match detected') : undefined,
+        disqualifiedReason: isSameIpMatch
+          ? (ref.disqualifiedReason || 'Same IP or Device match detected')
+          : (!isBothDone
+            ? (!hasChannel && !hasThreeTasks
+              ? 'Channel join and 3 tasks required'
+              : (!hasChannel ? 'Channel join required' : `Complete 3 tasks (${completedTasksCount}/3)`))
+            : undefined),
       };
     }).filter(item => {
       // STRICT FILTER:
