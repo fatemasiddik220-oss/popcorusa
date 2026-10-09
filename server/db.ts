@@ -564,18 +564,9 @@ class DatabaseEngine {
       existing.ipAddress = clientIp;
       existing.deviceFingerprint = fingerprint;
 
-      // Anti-Cheat check: detect if same device/IP has multiple accounts
-      if (this.config.antiCheatEnabled && !existing.isFlagged) {
-        const ipUsers = this.ipHistory.get(clientIp) || [];
-        const fpUsers = this.fingerprintHistory.get(fingerprint) || [];
-        const otherIpUsers = ipUsers.filter(id => id !== existing.id);
-        const otherFpUsers = fpUsers.filter(id => id !== existing.id);
+      // Anti-Cheat check: only flag if account matches exact referrer device & IP simultaneously during referral
+      // Unrelated accounts sharing a network/IP or hotspot are not penalized
 
-        if (otherIpUsers.length > 2 || otherFpUsers.length > 1) {
-          existing.isFlagged = true;
-          existing.flaggedReason = 'MULTIPLE ACCOUNT / FLAGGED - Shared IP/Device detected';
-        }
-      }
 
       // Link referrer if not yet linked (Strict Self-Referral Prevention & Uniqueness: can only be referred ONCE)
       const cleanRefId = params.referrerId ? params.referrerId.replace(/^ref[_-]/i, '').trim() : '';
@@ -702,34 +693,10 @@ class DatabaseEngine {
     const newId = `usr-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     const now = new Date().toISOString();
 
-    // Anti-cheat verification on registration
-    // Loosen strict same-IP anti-cheat blocks during local/staging tests so multiple devices on the same local network register referrals properly.
+    // Anti-cheat verification on registration:
+    // Only flag if user registers from the exact same device and IP simultaneously with their referrer (self-referral/duplicate)
     let isFlagged = false;
     let flaggedReason: string | undefined = undefined;
-
-    const isLocalOrStaging = clientIp === '127.0.0.1' || 
-      clientIp === '::1' || 
-      clientIp.startsWith('192.168.') || 
-      clientIp.startsWith('10.') || 
-      clientIp.startsWith('172.') || 
-      process.env.NODE_ENV !== 'production';
-
-    const existingIpUsers = this.ipHistory.get(clientIp) || [];
-    const existingFpUsers = this.fingerprintHistory.get(fingerprint) || [];
-
-    // STRICT DEVICE ANTI-FRAUD & MULTI-ACCOUNT DETECTION:
-    // If a new account is registered from a device/browser fingerprint that was ALREADY used to create another account:
-    const isDeviceAlreadyUsed = existingFpUsers.length > 0;
-    if (this.config.antiCheatEnabled && isDeviceAlreadyUsed) {
-      isFlagged = true;
-      flaggedReason = 'DISQUALIFIED / FRAUD DETECTED - Device already registered to another account';
-    }
-
-    // Also flag if excessive accounts from same IP (>10)
-    if (this.config.antiCheatEnabled && !isLocalOrStaging && existingIpUsers.length >= 10) {
-      isFlagged = true;
-      flaggedReason = flaggedReason || 'MULTIPLE ACCOUNT / FLAGGED - Shared IP limit exceeded';
-    }
 
     const referralCode = this.generateUniqueReferralCode();
 
@@ -767,8 +734,10 @@ class DatabaseEngine {
     };
 
     // Track IP & fingerprint history
+    const existingIpUsers = this.ipHistory.get(clientIp) || [];
     existingIpUsers.push(newId);
     this.ipHistory.set(clientIp, existingIpUsers);
+    const existingFpUsers = this.fingerprintHistory.get(fingerprint) || [];
     existingFpUsers.push(newId);
     this.fingerprintHistory.set(fingerprint, existingFpUsers);
 
@@ -1100,7 +1069,10 @@ class DatabaseEngine {
         target.tasksCompleted = completedTasksCount;
         target.completedTasksCount = completedTasksCount;
 
-        // Strict Unique IP and Device verification
+        // Strict Unique IP and Device verification:
+        // A referral should ONLY be flagged as duplicate, multi-account, or "Same IP / Device" violation
+        // if both referrer and referred user match BOTH IP address and device fingerprint simultaneously,
+        // or belong to the same local session / self-referral.
         const sameIp = Boolean(
           inviter.ipAddress && user.ipAddress &&
           inviter.ipAddress === user.ipAddress &&
@@ -1112,18 +1084,14 @@ class DatabaseEngine {
           inviter.deviceFingerprint === user.deviceFingerprint
         );
         const isSelf = inviter.id === user.id || inviter.telegramId === user.telegramId;
-        const isFlagged = Boolean(user.isFlagged);
-        const isFraudOrSameIp = sameIp || sameDevice || isSelf || isFlagged;
+        const sameIpAndDevice = Boolean(sameIp && sameDevice);
+        const isFraudOrSameIp = isSelf || sameIpAndDevice;
 
         if (isFraudOrSameIp) {
-          // 1. UNQUALIFIED: Same IP / Device Match or Self-Referral -> UNQUALIFIED
-          const reason = sameIp && sameDevice
-            ? 'Same IP and Device ID detected'
-            : sameIp
-            ? 'Same IP address detected'
-            : sameDevice
-            ? 'Same Device ID detected'
-            : (isSelf ? 'Self-referral detected' : 'Account flagged');
+          // 1. UNQUALIFIED: Same IP & Device Match simultaneously or Self-Referral -> UNQUALIFIED
+          const reason = isSelf
+            ? 'Self-referral detected'
+            : 'Same IP and Device ID detected';
 
           user.isQualified = false;
           user.isFlagged = true;
@@ -1925,13 +1893,14 @@ class DatabaseEngine {
         inviter && u && inviter.deviceFingerprint && u.deviceFingerprint &&
         inviter.deviceFingerprint === u.deviceFingerprint
       );
+      const isSelf = Boolean(inviter && u && (inviter.id === u.id || inviter.telegramId === u.telegramId));
+      const sameIpAndDevice = Boolean(sameIp && sameDevice);
+
+      // Only flag match when both IP and device fingerprints match simultaneously or same local session / self-referral
       const isSameIpMatch = Boolean(
-        sameIp || sameDevice || ref.isMultiAccount || u?.isFlagged ||
-        ref.status === 'Unqualified (Same IP / Device Match)' ||
-        ref.status === 'UNQUALIFIED - SAME IP' ||
-        ref.status === 'UNQUALIFIED - SAME DEVICE' ||
-        ref.status === 'Unqualified' ||
-        (ref as any).status === 'UNQUALIFIED'
+        isSelf ||
+        sameIpAndDevice ||
+        (ref.disqualifiedReason && (ref.disqualifiedReason.toLowerCase().includes('same ip and device') || ref.disqualifiedReason.toLowerCase().includes('self-referral')))
       );
 
       const completedTasksCount = u

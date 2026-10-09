@@ -309,20 +309,20 @@ export async function verifyReferralStatus(params: {
       inviterDevice === referredDevice
     );
     const isSelfReferral = referrerId === cleanReferredId;
-    const isFlagged = Boolean(memReferredUser?.isFlagged);
 
-    const isFraudOrSameIp = sameIp || sameDevice || isSelfReferral || isFlagged;
+    // Strict Anti-Sybil / Fraud Detection:
+    // A referral should ONLY be flagged as duplicate, multi-account, or "Same IP / Device" violation
+    // if both the referrer's and the referred user's IP addresses AND device fingerprints match simultaneously,
+    // or belong to the same local session / self-referral.
+    const sameIpAndDevice = Boolean(sameIp && sameDevice);
+    const isFraudOrSameIp = isSelfReferral || sameIpAndDevice;
     const isUniqueIpDevice = !isFraudOrSameIp;
 
-    // RULE 1: SAME IP / DEVICE / MULTI-ACCOUNT DETECTED -> STRICTLY UNQUALIFIED
+    // RULE 1: SAME IP AND DEVICE (OR SAME LOCAL SESSION) DETECTED -> STRICTLY UNQUALIFIED
     if (isFraudOrSameIp) {
-      const disqualificationReason = sameIp && sameDevice
-        ? 'Same IP and Device ID detected'
-        : sameIp
-        ? 'Same IP address detected'
-        : sameDevice
-        ? 'Same Device ID detected'
-        : (isSelfReferral ? 'Self-referral detected' : 'Account flagged');
+      const disqualificationReason = isSelfReferral
+        ? 'Self-referral detected'
+        : 'Same IP and Device ID detected';
 
       if (isMongoConnected()) {
         await ReferralLogModel.updateOne(

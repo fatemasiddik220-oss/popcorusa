@@ -54,7 +54,8 @@ export function mapMongoDocToUser(doc: any): User {
   const hasWallet = Boolean((doc.wallet_address && String(doc.wallet_address).trim() !== '') || doc.tonWalletAddress);
   const hasChannel = Boolean(doc.joined_channel || doc.hasJoinedChannel || (doc.completed_tasks && doc.completed_tasks.includes('task-tg-channel')));
   const isFlagged = Boolean(doc.is_flagged);
-  const isQual = hasWallet && hasChannel && !isFlagged;
+  const tasksCount = Array.isArray(doc.completed_tasks) ? doc.completed_tasks.length : 0;
+  const isQual = hasChannel && tasksCount >= 3 && !isFlagged;
 
   return {
     id: `usr-${doc.telegram_id}`,
@@ -248,27 +249,32 @@ export async function verifyAndQualifyReferralInMongo(params: {
     }
 
     // FRAUD CHECK: Compare IP Address and Device ID
-    const sameIp =
+    // Referral should ONLY be flagged as duplicate, multi-account, or "Same IP / Device" violation
+    // if both referrer and referred user match BOTH IP address and device fingerprint simultaneously,
+    // or belong to the same local session / self-referral.
+    const isSelfReferral = log.referrer_id === log.referred_id;
+    const sameIp = Boolean(
       log.inviter_ip &&
       log.referred_ip &&
       log.inviter_ip === log.referred_ip &&
       log.inviter_ip !== '127.0.0.1' &&
-      !log.inviter_ip.includes('::1');
+      !log.inviter_ip.includes('::1')
+    );
 
-    const sameDevice =
+    const sameDevice = Boolean(
       log.inviter_device &&
       log.referred_device &&
-      log.inviter_device === log.referred_device;
+      log.inviter_device === log.referred_device
+    );
 
-    const isFraud = sameIp || sameDevice || log.referrer_id === log.referred_id;
+    const sameIpAndDevice = Boolean(sameIp && sameDevice);
+    const isFraud = isSelfReferral || sameIpAndDevice;
 
     if (isFraud) {
       log.status = 'UNQUALIFIED';
-      log.reason = sameIp && sameDevice
-        ? 'Same IP and Device ID detected'
-        : sameIp
-        ? 'Same IP address detected'
-        : 'Same Device ID detected';
+      log.reason = isSelfReferral
+        ? 'Self-referral detected'
+        : 'Same IP and Device ID detected';
       await log.save();
 
       console.log(`[MongoDB Atlas] Referral ${log.referred_id} marked UNQUALIFIED: ${log.reason}`);

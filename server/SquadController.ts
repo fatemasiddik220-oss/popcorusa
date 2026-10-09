@@ -382,19 +382,11 @@ export const SquadController = {
         );
         const mReason = (mItem.disqualifiedReason || '').toLowerCase();
         const isUnqual = Boolean(
-          mItem.status === 'Unqualified' ||
-          mItem.status === 'Unqualified (Same IP / Device Match)' ||
-          mItem.status === 'UNQUALIFIED - SAME IP' ||
-          mItem.status === 'UNQUALIFIED - SAME DEVICE' ||
-          (mItem as any).status === 'UNQUALIFIED' ||
-          mItem.isMultiAccount ||
+          String(mItem.status || '').toUpperCase() === 'UNQUALIFIED' ||
           (mReason && (
-            mReason.includes('same ip') ||
-            mReason.includes('same device') ||
-            mReason.includes('self-referral') ||
-            mReason.includes('multi-account') ||
-            mReason.includes('multi account') ||
-            mReason.includes('flagged')
+            mReason.includes('same ip and device') ||
+            mReason.includes('same ip & device') ||
+            mReason.includes('self-referral')
           ))
         );
         const mTasksCount = Number(mItem.tasksCompleted ?? mItem.completedTasksCount ?? (mItem as any).tasks_count ?? 0);
@@ -469,17 +461,11 @@ export const SquadController = {
         );
         const rReason = (r.disqualifiedReason || '').toLowerCase();
         const isUnqual = Boolean(
-          s.includes('UNQUALIFIED') ||
-          s.includes('SAME IP') ||
-          s.includes('SAME DEVICE') ||
-          r.isMultiAccount ||
+          s === 'UNQUALIFIED' ||
           (rReason && (
-            rReason.includes('same ip') ||
-            rReason.includes('same device') ||
-            rReason.includes('self-referral') ||
-            rReason.includes('multi-account') ||
-            rReason.includes('multi account') ||
-            rReason.includes('flagged')
+            rReason.includes('same ip and device') ||
+            rReason.includes('same ip & device') ||
+            rReason.includes('self-referral')
           ))
         );
         const rTasksCount = Number(r.tasksCompleted ?? r.completedTasksCount ?? (r as any).tasks_count ?? 0);

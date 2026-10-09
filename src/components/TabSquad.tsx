@@ -1328,7 +1328,7 @@ export const TabSquad: React.FC<TabSquadProps> = ({
                 <span>Anti-Fraud & Self-Referral Prevention</span>
               </div>
               <p className="text-[11px] leading-relaxed text-gray-300">
-                Users creating multiple accounts using the same phone, device, or shared IP address are automatically flagged as <strong className="text-red-400">"Unqualified (Same IP / Device Match)"</strong>. Unqualified or self-referred users generate <strong className="text-red-400">0 POP bonus and 0% mining commissions</strong>.
+                A referral is strictly checked against duplicate multi-accounting. Only accounts sharing the exact same device hardware and local internet connection simultaneously at registration with their referrer are flagged as <strong className="text-red-400">"Unqualified (Same IP / Device Match)"</strong>. Users joining via different networks, mobile hotspots, or distinct devices qualify normally after completing the official channel join and 3 tasks.
               </p>
             </div>
 

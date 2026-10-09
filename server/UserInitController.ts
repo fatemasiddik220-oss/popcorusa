@@ -13,7 +13,8 @@ function getClientInfo(req: Request) {
   const clientFp = (req.headers['x-device-fingerprint'] as string) || '';
   const tgPlatform = (req.headers['x-telegram-platform'] as string) || '';
 
-  const compositeKey = `${ip}::${ua}::${clientFp}::${tgPlatform}`;
+  // Generate hardware / client device fingerprint (independent of network IP so hotspot/network changes don't alter it)
+  const compositeKey = `${ua}::${clientFp}::${tgPlatform}`;
   const deviceHash = crypto.createHash('sha256').update(compositeKey).digest('hex').slice(0, 32);
   const fingerprint = `dfp_${deviceHash}`;
   return { ip, fingerprint };
